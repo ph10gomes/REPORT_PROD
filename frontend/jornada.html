@@ -66,8 +66,11 @@
       </div>
 
       <div class="filtro filtro-periodo hidden" data-periodo-campo="semana">
-        <label class="label" for="filtroSemanaAnalisada">Semana</label>
-        <input type="week" id="filtroSemanaAnalisada">
+        <label class="label" for="filtroSemanaAnalisada">Data da Semana</label>
+        <div class="semana-input-wrap">
+          <span class="semana-numero" id="numeroSemanaSelecionada">Semana -</span>
+          <input type="date" id="filtroSemanaAnalisada">
+        </div>
       </div>
 
       <div class="filtro filtro-periodo hidden" data-periodo-campo="mes">
@@ -144,6 +147,7 @@
       <table id="tabelaRelatorio">
         <thead>
           <tr>
+            <th>Cód. Equipe</th>
             <th>Equipes</th>
             <th>Início<br>Jornada</th>
             <th>Status<br>Início</th>

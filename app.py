@@ -1650,7 +1650,7 @@ def lote_prod_equipes():
                 f"""
                 SELECT
                   DATA,
-                  COD_EQUIPE,
+                  TRIM(CAST(COD_EQUIPE AS CHAR)) AS COD_EQUIPE,
                   VALOR_US,
                   META,
                   VALOR_US_MES,
@@ -1670,7 +1670,7 @@ def lote_prod_equipes():
             sql = f"""
                 SELECT
                   DATA,
-                  COD_EQUIPE,
+                  TRIM(CAST(COD_EQUIPE AS CHAR)) AS COD_EQUIPE,
                   VALOR_US,
                   META,
                   VALOR_US_MES,
@@ -1837,6 +1837,8 @@ def jornadas():
             sql = f"""
                 SELECT
                   COD_UO,
+                  COALESCE(NULLIF(TRIM(CAST(COD_EQUIPE AS CHAR)), ''), NULLIF(TRIM(CAST(NUM_EQUIPE AS CHAR)), '')) AS COD_EQUIPE,
+                  NUM_EQUIPE,
                   NOME_SUPERVISOR AS SUPERVISOR_EQUIPE,
                   NOME_LIDER AS LIDER_CONTROLADOR,
                   NOME_CONTROLADOR,
@@ -1869,6 +1871,7 @@ def jornadas():
             sql = f"""
                 SELECT
                   COD_UO,
+                  COD_EQUIPE,
                   SUPERVISOR_EQUIPE,
                   LIDER_CONTROLADOR,
                   NOME_CONTROLADOR,

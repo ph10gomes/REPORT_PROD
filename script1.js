@@ -5,6 +5,10 @@ const contentElement = document.querySelector('.content');
 const supervisorView = document.querySelector('.supervisor-view');
 const supervisorButton = document.getElementById('supervisorButton');
 const backButton = document.getElementById('backButton');
+const andonMenuButton = document.getElementById('andonMenuButton');
+const andonMenuDrawer = document.getElementById('andonMenuDrawer');
+const andonMenuOverlay = document.getElementById('andonMenuOverlay');
+const andonMenuClose = document.getElementById('andonMenuClose');
 const uoFilter = document.getElementById('uoFilter');
 const uoOptionsContainer = document.getElementById('uoOptionsContainer');
 const uoSelected = document.getElementById('uoSelected');
@@ -19,6 +23,7 @@ const supDatePopup = document.getElementById('supDatePopup');
 const supDateWrapper = document.getElementById('supDateWrapper');
 const supervisorCards = Array.from(document.querySelectorAll('.supervisor-card'));
 const perfTotalEquipes = document.getElementById('perfTotalEquipes');
+const perfTotalEquipesLote = document.getElementById('perfTotalEquipesLote');
 const perfClassificacaoWm = document.getElementById('perfClassificacaoWm');
 const perfClassificacaoLote = document.getElementById('perfClassificacaoLote');
 const perfEquipesDWm = document.getElementById('perfEquipesDWm');
@@ -31,6 +36,7 @@ const sdcaPercAcordadas = document.getElementById('sdcaPercAcordadas');
 const sdcaEquipesJustificadas = document.getElementById('sdcaEquipesJustificadas');
 const sdcaPercJustificadas = document.getElementById('sdcaPercJustificadas');
 const cardPerfTotalEquipes = document.getElementById('cardPerfTotalEquipes');
+const cardPerfTotalEquipesLote = document.getElementById('cardPerfTotalEquipesLote');
 const cardPerfEquipesDWm = document.getElementById('cardPerfEquipesDWm');
 const cardPerfEquipesDLote = document.getElementById('cardPerfEquipesDLote');
 const cardSdcaEquipesAcordadas = document.getElementById('cardSdcaEquipesAcordadas');
@@ -152,6 +158,13 @@ let andonFolhaPontoLoadingPromise = null;
 let andonLoteProdEquipesLoadedKey = '';
 let andonLoteProdEquipesLoadingPromise = null;
 let andonAcordosBase = {};
+let andonFiltroCache = { key: '', values: {} };
+const MODAL_PAGE_SIZE = 300;
+let modalTabelaEstado = null;
+
+function limparCacheAndon() {
+  andonFiltroCache = { key: '', values: {} };
+}
 
 function classificarFaixa(percentual) {
   if (percentual < 75) return 'D';
@@ -222,6 +235,27 @@ function formatHoraMedia(minutos) {
 function formatClassificacao(percentual) {
   if (!Number.isFinite(percentual)) return '--';
   return `${classificarFaixa(percentual)}-${Math.round(percentual)}%`;
+}
+
+const CLASSES_FAIXA_KPI = ['kpi-faixa-aa', 'kpi-faixa-a', 'kpi-faixa-b', 'kpi-faixa-c', 'kpi-faixa-d', 'kpi-faixa-neutra'];
+const CLASSES_PERCENTUAL_KPI = ['kpi-percentual-ok', 'kpi-percentual-alerta'];
+
+function obterFaixaClassificacaoTexto(texto) {
+  const faixa = String(texto || '').trim().toUpperCase().split('-')[0];
+  return ['AA', 'A', 'B', 'C', 'D'].includes(faixa) ? faixa : '';
+}
+
+function aplicarCorFaixaKpi(card, faixa) {
+  if (!card) return;
+  card.classList.remove(...CLASSES_FAIXA_KPI);
+  const faixaNormalizada = String(faixa || '').trim().toLowerCase();
+  card.classList.add(faixaNormalizada ? `kpi-faixa-${faixaNormalizada}` : 'kpi-faixa-neutra');
+}
+
+function aplicarCorPercentualKpi(valueEl, percentual, limite = 20) {
+  if (!valueEl) return;
+  valueEl.classList.remove(...CLASSES_PERCENTUAL_KPI);
+  valueEl.classList.add(Number(percentual || 0) > limite ? 'kpi-percentual-alerta' : 'kpi-percentual-ok');
 }
 
 function textoContemMtami(valor) {
@@ -305,7 +339,7 @@ function obterHoraLinha(row) {
 
 function obterDataControleLinha(row) {
   return normalizarDataIso(
-    obterValorPrimeiro(row, ['DATA_ATUALIZACAO', 'DATA_ATUALIZAÇÃO', 'DATA_DESIGNACAO', 'DATA DESIGNACAO', 'DESIGNACAO'])
+    obterValorPrimeiro(row, ['DATA_ATUALIZACAO', 'DATA_ATUALIZAÇÃO', 'DATA_ATUALIZACAO_D', 'DATA_DESIGNACAO', 'DATA DESIGNACAO', 'DESIGNACAO'])
   );
 }
 
@@ -379,7 +413,7 @@ function obterCodigoEquipeLinha(row) {
 
 function obterDataControleLinha(row) {
   return normalizarDataIso(
-    obterValorPrimeiro(row, ['DATA_ATUALIZACAO', 'DATA_ATUALIZAÇÃO', 'DATA_ATUALIZAÃ‡ÃƒO', 'DATA_DESIGNACAO', 'DATA DESIGNACAO', 'DESIGNACAO'])
+    obterValorPrimeiro(row, ['DATA_ATUALIZACAO', 'DATA_ATUALIZAÇÃO', 'DATA_ATUALIZAÃ‡ÃƒO', 'DATA_ATUALIZACAO_D', 'DATA_DESIGNACAO', 'DATA DESIGNACAO', 'DESIGNACAO'])
   );
 }
 
@@ -420,6 +454,37 @@ function obterChavePeriodoFiltroAndon() {
   return `${periodo.inicio || 'ini'}:${periodo.fim || 'fim'}`;
 }
 
+function obterChaveCacheFiltroAndon() {
+  const uo = String(headerSelectedUo || '').replace(/[^\d]/g, '') || 'todas';
+  const semanas = headerSelectedWeeks
+    .map((week) => `${normalizarDataIso(week.start)}>${normalizarDataIso(week.end)}`)
+    .join(',');
+  const mes = headerSelectedMonth
+    ? `${headerSelectedMonth.year}-${String(headerSelectedMonth.month + 1).padStart(2, '0')}`
+    : '';
+
+  return [
+    obterChavePeriodoFiltroAndon(),
+    uo,
+    semanas,
+    mes,
+    andonReportRows.length,
+    andonLoteProdRows.length,
+    andonLoteProdEquipesDRows.length,
+    andonControleLoadedKey,
+    andonFolhaPontoLoadedKey,
+    andonLoteProdEquipesLoadedKey
+  ].join('|');
+}
+
+function obterCacheFiltroAndon() {
+  const key = obterChaveCacheFiltroAndon();
+  if (andonFiltroCache.key !== key) {
+    andonFiltroCache = { key, values: {} };
+  }
+  return andonFiltroCache.values;
+}
+
 async function carregarLoteProdEquipesAndon() {
   const periodo = obterPeriodoFiltroAndon();
   const chave = obterChavePeriodoFiltroAndon();
@@ -436,11 +501,13 @@ async function carregarLoteProdEquipesAndon() {
     .then((payload) => {
       andonLoteProdEquipesRows = Array.isArray(payload && payload.rows) ? payload.rows : [];
       andonLoteProdEquipesLoadedKey = chave;
+      limparCacheAndon();
     })
     .catch((error) => {
       console.error('Erro ao carregar equipes do lote produtivo:', error);
       andonLoteProdEquipesRows = [];
       andonLoteProdEquipesLoadedKey = chave;
+      limparCacheAndon();
     })
     .finally(() => {
       andonLoteProdEquipesLoadingPromise = null;
@@ -466,11 +533,13 @@ async function carregarControleServicoAndon() {
     .then((payload) => {
       andonControleRows = Array.isArray(payload && payload.rows) ? payload.rows : [];
       andonControleLoadedKey = chave;
+      limparCacheAndon();
     })
     .catch((error) => {
       console.error('Erro ao carregar controle de servico no ANDON:', error);
       andonControleRows = [];
       andonControleLoadedKey = chave;
+      limparCacheAndon();
     })
     .finally(() => {
       andonControleLoadingPromise = null;
@@ -496,11 +565,13 @@ async function carregarFolhaPontoAndon() {
     .then((payload) => {
       andonFolhaPontoRows = Array.isArray(payload && payload.rows) ? payload.rows : [];
       andonFolhaPontoLoadedKey = chave;
+      limparCacheAndon();
     })
     .catch((error) => {
       console.error('Erro ao carregar folha ponto no ANDON:', error);
       andonFolhaPontoRows = [];
       andonFolhaPontoLoadedKey = chave;
+      limparCacheAndon();
     })
     .finally(() => {
       andonFolhaPontoLoadingPromise = null;
@@ -510,52 +581,70 @@ async function carregarFolhaPontoAndon() {
 }
 
 function filtrarReportRowsAndon() {
-  return andonReportRows.filter((row) => {
+  const cache = obterCacheFiltroAndon();
+  if (cache.reportRows) return cache.reportRows;
+  cache.reportRows = andonReportRows.filter((row) => {
     const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA']));
     const uo = obterUoLinha(row);
     if (headerSelectedUo && uo !== headerSelectedUo.replace(/[^\d]/g, '')) return false;
     return linhaPassaFiltrosPeriodo(dataIso);
   });
+  return cache.reportRows;
 }
 
 function filtrarControleRowsAndon() {
-  return andonControleRows.filter((row) => {
+  const cache = obterCacheFiltroAndon();
+  if (cache.controleRows) return cache.controleRows;
+  cache.controleRows = andonControleRows.filter((row) => {
     const dataIso = obterDataControleLinha(row);
     const uo = obterUoLinha(row);
     if (headerSelectedUo && uo !== headerSelectedUo.replace(/[^\d]/g, '')) return false;
     return linhaPassaFiltrosPeriodo(dataIso);
   });
+  return cache.controleRows;
 }
 
 function filtrarFolhaPontoRowsAndon() {
-  return andonFolhaPontoRows.filter((row) => {
+  const cache = obterCacheFiltroAndon();
+  if (cache.folhaPontoRows) return cache.folhaPontoRows;
+  cache.folhaPontoRows = andonFolhaPontoRows.filter((row) => {
     const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
     if (!linhaPassaFiltrosPeriodo(dataIso)) return false;
     const uo = String(obterValorPrimeiro(row, ['COD_UO', 'UO']) || '').replace(/[^\d]/g, '');
     if (headerSelectedUo && uo && uo !== headerSelectedUo.replace(/[^\d]/g, '')) return false;
     return true;
   });
+  return cache.folhaPontoRows;
 }
 
 function filtrarLoteProdRowsAndon() {
-  return andonLoteProdRows.filter((row) => {
+  const cache = obterCacheFiltroAndon();
+  if (cache.loteProdRows) return cache.loteProdRows;
+  cache.loteProdRows = andonLoteProdRows.filter((row) => {
     const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
     return linhaPassaFiltrosPeriodo(dataIso);
   });
+  return cache.loteProdRows;
 }
 
 function filtrarLoteProdEquipesRowsAndon() {
-  return andonLoteProdEquipesRows.filter((row) => {
+  const cache = obterCacheFiltroAndon();
+  if (cache.loteProdEquipesRows) return cache.loteProdEquipesRows;
+  cache.loteProdEquipesRows = andonLoteProdEquipesRows.filter((row) => {
     const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
     return linhaPassaFiltrosPeriodo(dataIso);
   });
+  return cache.loteProdEquipesRows;
 }
 
 function filtrarLoteProdEquipesDRowsAndon() {
-  return andonLoteProdEquipesDRows.filter((row) => {
+  const cache = obterCacheFiltroAndon();
+  if (cache.loteProdEquipesDRows) return cache.loteProdEquipesDRows;
+  cache.loteProdEquipesDRows = andonLoteProdEquipesDRows.filter((row) => {
     const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
     return linhaPassaFiltrosPeriodo(dataIso);
   });
+  return cache.loteProdEquipesDRows;
 }
 
 function obterCodigoEquipeLote(row) {
@@ -600,6 +689,20 @@ function calcularResumoLoteProd(rows = []) {
   };
 }
 
+function calcularTotalEquipesLoteProd() {
+  const codigosUoAtual = obterCodigosEquipesUoAtual();
+  const codigos = new Set();
+
+  filtrarLoteProdEquipesRowsAndon().forEach((row) => {
+    const codigo = obterCodigoEquipeLote(row);
+    if (!codigo) return;
+    if (codigosUoAtual && !codigosUoAtual.has(codigo)) return;
+    codigos.add(codigo);
+  });
+
+  return codigos.size;
+}
+
 function obterMapaNomesEquipesReport(rows = filtrarReportRowsAndon()) {
   const mapa = new Map();
   rows.forEach((row) => {
@@ -611,6 +714,7 @@ function obterMapaNomesEquipesReport(rows = filtrarReportRowsAndon()) {
 }
 
 function renderCabecalhoModalEquipesPadrao() {
+  removerResumoControleServicoModal();
   const tr = document.querySelector('#equipesModal thead tr');
   if (!tr) return;
   tr.innerHTML = `
@@ -630,8 +734,30 @@ function renderCabecalhoModalEquipesPadrao() {
 }
 
 function renderCabecalhoModalEquipesDLoteProd() {
+  removerResumoControleServicoModal();
   const tr = document.querySelector('#equipesModal thead tr');
   if (!tr) return;
+  tr.innerHTML = `
+    <th>Data</th>
+    <th>Supervisor</th>
+    <th>Equipe</th>
+    <th>Meta</th>
+    <th>Prod.</th>
+    <th>Faixa Dia W.M</th>
+    <th>% PROD. WM</th>
+    <th>Prod. Lote</th>
+    <th>Faixa Dia Lote</th>
+    <th>% PROD. LOTE</th>
+    <th>In&iacute;cio Jornada</th>
+    <th>In&iacute;cio Refei&ccedil;&atilde;o</th>
+    <th>T&eacute;rmino Refei&ccedil;&atilde;o</th>
+    <th>1&ordm; Atendimento</th>
+    <th>&Uacute;lt. Atendimento</th>
+    <th>Fim Jornada</th>
+    <th>Jornada Produtiva</th>
+    <th>Comparativo</th>
+  `;
+  return;
   tr.innerHTML = `
     <th>Equipe</th>
     <th>Meta Dia</th>
@@ -645,6 +771,7 @@ function renderCabecalhoModalEquipesDLoteProd() {
 }
 
 function renderCabecalhoModalAbsenteismo() {
+  removerResumoControleServicoModal();
   const tr = document.querySelector('#equipesModal thead tr');
   if (!tr) return;
   tr.innerHTML = `
@@ -661,6 +788,7 @@ function renderCabecalhoModalAbsenteismo() {
 }
 
 function renderCabecalhoModalJornadaOcorrencia(tipo = '') {
+  removerResumoControleServicoModal();
   const tr = document.querySelector('#equipesModal thead tr');
   if (!tr) return;
   const mostrarHoraEntrada = tipo === 'saida-antecipada';
@@ -679,13 +807,286 @@ function renderCabecalhoModalJornadaOcorrencia(tipo = '') {
 }
 
 function renderCabecalhoModalGenerico(colunas = []) {
+  removerResumoControleServicoModal();
   const tr = document.querySelector('#equipesModal thead tr');
   if (!tr) return;
-  tr.innerHTML = colunas.map((coluna) => `<th>${coluna.label}</th>`).join('');
+  tr.innerHTML = colunas.map((coluna, index) => `
+    <th>
+      <button type="button" class="andon-modal-sort" data-col="${index}">
+        <span>${coluna.label}</span>
+        <span class="andon-modal-sort-icon">↕</span>
+      </button>
+      <select class="andon-modal-filter-select" data-col="${index}" title="Filtrar coluna">
+        <option value="">Todos</option>
+      </select>
+    </th>
+  `).join('');
+}
+
+function normalizarTextoFiltroModal(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+}
+
+function obterLinhasDadosModal() {
+  return Array.from(equipesModalBody?.querySelectorAll('tr') || [])
+    .filter((tr) => !tr.querySelector('.andon-modal-empty'));
+}
+
+function obterValorCelulaModal(row, coluna) {
+  try {
+    return String(coluna.value(row) ?? '');
+  } catch (error) {
+    console.error('Erro ao renderizar coluna do modal:', error);
+    return '-';
+  }
+}
+
+function renderizarLinhaModal(row, columns) {
+  return `<tr>${columns.map((coluna) => `<td>${obterValorCelulaModal(row, coluna)}</td>`).join('')}</tr>`;
+}
+
+function obterRowsFiltradasModal() {
+  if (!modalTabelaEstado) return [];
+  const { rows, columns, filtros } = modalTabelaEstado;
+  return rows.filter((row) => columns.every((coluna, index) => {
+    const filtro = filtros[index];
+    if (!filtro) return true;
+    return normalizarTextoFiltroModal(obterValorCelulaModal(row, coluna)) === filtro;
+  }));
+}
+
+function atualizarPaginacaoModal(totalRows) {
+  document.getElementById('andonModalPagination')?.remove();
+  if (!modalTabelaEstado || totalRows <= modalTabelaEstado.pageSize) return;
+  const tabelaWrap = equipesModal?.querySelector('.andon-modal-table-wrap');
+  if (!tabelaWrap) return;
+  const totalPaginas = Math.max(1, Math.ceil(totalRows / modalTabelaEstado.pageSize));
+  const pagina = Math.min(modalTabelaEstado.page, totalPaginas);
+  tabelaWrap.insertAdjacentHTML('afterend', `
+    <div class="andon-modal-pagination" id="andonModalPagination">
+      <button type="button" data-modal-page="prev"${pagina <= 1 ? ' disabled' : ''}>Anterior</button>
+      <span>${formatInt(pagina)} / ${formatInt(totalPaginas)} · ${formatInt(totalRows)} registros</span>
+      <button type="button" data-modal-page="next"${pagina >= totalPaginas ? ' disabled' : ''}>Próxima</button>
+    </div>
+  `);
+  document.querySelectorAll('#andonModalPagination [data-modal-page]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      modalTabelaEstado.page += btn.dataset.modalPage === 'next' ? 1 : -1;
+      renderizarPaginaModalEstado();
+    });
+  });
+}
+
+function renderizarPaginaModalEstado() {
+  if (!modalTabelaEstado || !equipesModalBody) return;
+  const filtradas = obterRowsFiltradasModal();
+  const totalPaginas = Math.max(1, Math.ceil(filtradas.length / modalTabelaEstado.pageSize));
+  modalTabelaEstado.page = Math.min(Math.max(1, modalTabelaEstado.page), totalPaginas);
+  const inicio = (modalTabelaEstado.page - 1) * modalTabelaEstado.pageSize;
+  const pageRows = filtradas.slice(inicio, inicio + modalTabelaEstado.pageSize);
+  equipesModalBody.innerHTML = pageRows.length
+    ? pageRows.map((row) => renderizarLinhaModal(row, modalTabelaEstado.columns)).join('')
+    : `<tr><td colspan="${modalTabelaEstado.columns.length || 1}" class="andon-modal-empty">${modalTabelaEstado.empty}</td></tr>`;
+  atualizarPaginacaoModal(filtradas.length);
+}
+
+function aplicarFiltrosModalAtual() {
+  if (modalTabelaEstado) {
+    modalTabelaEstado.filtros = Array.from(document.querySelectorAll('#equipesModal .andon-modal-filter-select'))
+      .map((select) => select.value || '');
+    modalTabelaEstado.page = 1;
+    renderizarPaginaModalEstado();
+    return;
+  }
+  const filtros = Array.from(document.querySelectorAll('#equipesModal .andon-modal-filter-select'))
+    .map((input) => normalizarTextoFiltroModal(input.value));
+  obterLinhasDadosModal().forEach((tr) => {
+    const visivel = filtros.every((filtro, index) => {
+      if (!filtro) return true;
+      const texto = normalizarTextoFiltroModal(tr.children[index]?.textContent || '');
+      return texto === filtro;
+    });
+    tr.classList.toggle('andon-modal-row-hidden', !visivel);
+  });
+}
+
+function valorOrdenacaoModal(texto) {
+  const raw = String(texto || '').trim();
+  const numero = Number(raw.replace(/\./g, '').replace(',', '.').replace('%', ''));
+  if (Number.isFinite(numero) && /[\d]/.test(raw)) return { tipo: 'numero', valor: numero };
+  return { tipo: 'texto', valor: normalizarTextoFiltroModal(raw) };
+}
+
+function ordenarModalPorColuna(index) {
+  if (!equipesModalBody) return;
+  const th = document.querySelector(`#equipesModal .andon-modal-sort[data-col="${index}"]`);
+  const direcaoAtual = th?.dataset.direcao === 'asc' ? 'desc' : 'asc';
+  document.querySelectorAll('#equipesModal .andon-modal-sort').forEach((btn) => {
+    btn.dataset.direcao = '';
+    const icon = btn.querySelector('.andon-modal-sort-icon');
+    if (icon) icon.textContent = '↕';
+  });
+  if (th) {
+    th.dataset.direcao = direcaoAtual;
+    const icon = th.querySelector('.andon-modal-sort-icon');
+    if (icon) icon.textContent = direcaoAtual === 'asc' ? '↑' : '↓';
+  }
+
+  if (modalTabelaEstado) {
+    const coluna = modalTabelaEstado.columns[index];
+    modalTabelaEstado.rows.sort((a, b) => {
+      const av = valorOrdenacaoModal(obterValorCelulaModal(a, coluna));
+      const bv = valorOrdenacaoModal(obterValorCelulaModal(b, coluna));
+      const cmp = av.tipo === 'numero' && bv.tipo === 'numero'
+        ? av.valor - bv.valor
+        : String(av.valor).localeCompare(String(bv.valor), 'pt-BR', { numeric: true, sensitivity: 'base' });
+      return direcaoAtual === 'asc' ? cmp : -cmp;
+    });
+    modalTabelaEstado.page = 1;
+    renderizarPaginaModalEstado();
+    return;
+  }
+
+  const linhas = obterLinhasDadosModal();
+  linhas.sort((a, b) => {
+    const av = valorOrdenacaoModal(a.children[index]?.textContent || '');
+    const bv = valorOrdenacaoModal(b.children[index]?.textContent || '');
+    const cmp = av.tipo === 'numero' && bv.tipo === 'numero'
+      ? av.valor - bv.valor
+      : String(av.valor).localeCompare(String(bv.valor), 'pt-BR', { numeric: true, sensitivity: 'base' });
+    return direcaoAtual === 'asc' ? cmp : -cmp;
+  });
+  linhas.forEach((tr) => equipesModalBody.appendChild(tr));
+  aplicarFiltrosModalAtual();
+}
+
+function preencherListasFiltroModal() {
+  document.querySelectorAll('#equipesModal .andon-modal-filter-select').forEach((select) => {
+    const index = Number(select.dataset.col || 0);
+    const valorAtual = select.value;
+    const valores = new Map();
+    if (modalTabelaEstado) {
+      const coluna = modalTabelaEstado.columns[index];
+      for (const row of modalTabelaEstado.rows) {
+        const texto = obterValorCelulaModal(row, coluna).trim();
+        if (!texto) continue;
+        const chave = normalizarTextoFiltroModal(texto);
+        if (!valores.has(chave)) valores.set(chave, texto);
+        if (valores.size >= 300) break;
+      }
+    } else {
+      obterLinhasDadosModal().forEach((tr) => {
+        const texto = String(tr.children[index]?.textContent || '').trim();
+        if (!texto) return;
+        const chave = normalizarTextoFiltroModal(texto);
+        if (!valores.has(chave)) valores.set(chave, texto);
+      });
+    }
+
+    const ordenados = Array.from(valores.entries())
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'pt-BR', { numeric: true, sensitivity: 'base' }))
+      .slice(0, 300);
+
+    select.innerHTML = '<option value="">Todos</option>' + ordenados
+      .map(([chave, texto]) => `<option value="${chave}">${texto}</option>`)
+      .join('');
+
+    if (valorAtual && valores.has(valorAtual)) select.value = valorAtual;
+  });
+}
+
+function renderizarModalTabelaPaginada(rows = [], columns = [], empty = 'Nenhum registro encontrado.') {
+  modalTabelaEstado = {
+    rows: Array.isArray(rows) ? rows.slice() : Array.from(rows || []),
+    columns,
+    empty,
+    page: 1,
+    pageSize: MODAL_PAGE_SIZE,
+    filtros: columns.map(() => '')
+  };
+  renderizarPaginaModalEstado();
+  ativarFiltrosOrdenacaoModal();
+}
+
+function ativarFiltrosOrdenacaoModal() {
+  const ths = Array.from(document.querySelectorAll('#equipesModal .andon-modal-table thead tr:first-child th'));
+  ths.forEach((th, index) => {
+    if (th.querySelector('.andon-modal-filter-select')) return;
+    const label = th.textContent.trim() || `Coluna ${index + 1}`;
+    th.innerHTML = `
+      <button type="button" class="andon-modal-sort" data-col="${index}">
+        <span>${label}</span>
+        <span class="andon-modal-sort-icon">↕</span>
+      </button>
+      <select class="andon-modal-filter-select" data-col="${index}" title="Filtrar coluna">
+        <option value="">Todos</option>
+      </select>
+    `;
+  });
+  preencherListasFiltroModal();
+  document.querySelectorAll('#equipesModal .andon-modal-filter-select').forEach((input) => {
+    if (input.dataset.filtroBound === '1') return;
+    input.dataset.filtroBound = '1';
+    input.addEventListener('change', () => {
+      input.classList.toggle('ativo', Boolean(input.value));
+      aplicarFiltrosModalAtual();
+    });
+  });
+  document.querySelectorAll('#equipesModal .andon-modal-sort').forEach((btn) => {
+    if (btn.dataset.sortBound === '1') return;
+    btn.dataset.sortBound = '1';
+    btn.addEventListener('click', () => ordenarModalPorColuna(Number(btn.dataset.col || 0)));
+  });
+}
+
+if (equipesModalBody) {
+  let modalFiltroTimer = null;
+  new MutationObserver(() => {
+    if (modalTabelaEstado) return;
+    clearTimeout(modalFiltroTimer);
+    modalFiltroTimer = setTimeout(ativarFiltrosOrdenacaoModal, 60);
+  }).observe(equipesModalBody, { childList: true });
 }
 
 function aplicarModalTelaCheia(ativo = false) {
   if (equipesModal) equipesModal.classList.toggle('andon-modal-fullscreen', Boolean(ativo));
+}
+
+function renderizarModalBodyEmLotes(rows = [], renderRow, emptyHtml = '', chunkSize = 500) {
+  if (!equipesModalBody) return;
+  const lista = Array.isArray(rows) ? rows : Array.from(rows || []);
+  const token = `${Date.now()}-${Math.random()}`;
+  equipesModalBody.dataset.renderToken = token;
+
+  if (!lista.length) {
+    equipesModalBody.innerHTML = emptyHtml;
+    setTimeout(ativarFiltrosOrdenacaoModal, 0);
+    return;
+  }
+
+  if (lista.length <= chunkSize) {
+    equipesModalBody.innerHTML = lista.map(renderRow).join('');
+    setTimeout(ativarFiltrosOrdenacaoModal, 0);
+    return;
+  }
+
+  equipesModalBody.innerHTML = '';
+  let index = 0;
+
+  const renderChunk = () => {
+    if (equipesModalBody.dataset.renderToken !== token) return;
+    const fim = Math.min(index + chunkSize, lista.length);
+    equipesModalBody.insertAdjacentHTML('beforeend', lista.slice(index, fim).map(renderRow).join(''));
+    index = fim;
+    if (index < lista.length) requestAnimationFrame(renderChunk);
+  };
+
+  renderChunk();
+  setTimeout(ativarFiltrosOrdenacaoModal, 0);
 }
 
 function abrirModalTabelaGenerica({ title = 'Detalhes', meta = '', columns = [], rows = [], empty = 'Nenhum registro encontrado.' } = {}) {
@@ -697,24 +1098,136 @@ function abrirModalTabelaGenerica({ title = 'Detalhes', meta = '', columns = [],
   if (equipesModalTitle) equipesModalTitle.textContent = title;
   if (equipesModalMeta) equipesModalMeta.textContent = meta || `Registros: ${formatInt(listaRows.length)}`;
 
-  if (!listaRows.length) {
-    equipesModalBody.innerHTML = `<tr><td colspan="${columns.length || 1}" class="andon-modal-empty">${empty}</td></tr>`;
-  } else {
-    equipesModalBody.innerHTML = listaRows.map((row) => `
-      <tr>
-        ${columns.map((coluna) => {
-          try {
-            return `<td>${coluna.value(row)}</td>`;
-          } catch (error) {
-            console.error('Erro ao renderizar coluna do modal:', error);
-            return '<td>-</td>';
-          }
-        }).join('')}
-      </tr>
-    `).join('');
-  }
+  renderizarModalBodyEmLotes(
+    [],
+    () => '',
+    ''
+  );
+  renderizarModalTabelaPaginada(listaRows, columns, empty);
 
   equipesModal.classList.remove('hidden');
+}
+
+function removerResumoControleServicoModal() {
+  document.getElementById('controleServicoResumoModal')?.remove();
+  document.getElementById('andonModalPagination')?.remove();
+  equipesModal?.classList.remove('andon-modal-controle-servico');
+  modalTabelaEstado = null;
+}
+
+function obterRowsReportPorCodigos(codigos = new Set()) {
+  const permitidos = new Set(Array.from(codigos).map((codigo) => String(codigo).trim()).filter(Boolean));
+  if (!permitidos.size) return [];
+  return filtrarReportRowsAndon().filter((row) => permitidos.has(String(obterCodigoEquipeLinha(row) || '').trim()));
+}
+
+function obterReferenciaFinalServico(row) {
+  return (
+    obterValorPrimeiro(row, ['DATA_TERMINO_REAL', 'ENCERRAMENTO', 'DATA_TERMINO']) ||
+    obterValorPrimeiro(row, ['DATA_LOCALIZACAO', 'LOCALIZACAO']) ||
+    obterValorPrimeiro(row, ['DATA_ACIONAMENTO', 'ACIONAMENTO', 'DATA ACIONAMENTO']) ||
+    ''
+  );
+}
+
+function calcularResumoControleServicoModal(rows = []) {
+  const codigos = new Set(
+    rows
+      .map((row) => String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim())
+      .filter(Boolean)
+  );
+  const reportRows = obterRowsReportPorCodigos(codigos);
+
+  let realizados = 0;
+  let produtivos = 0;
+  let improdutivos = 0;
+  let usPrev = 0;
+  let usExec = 0;
+  let primeiroAtendimentoMin = Infinity;
+  let ultimoAtendimentoMin = -Infinity;
+  let primeiroAtendimento = '-';
+  let ultimoAtendimento = '-';
+
+  rows.forEach((row) => {
+    const flag = normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS']));
+    if (flag === 'SIM' || flag === 'NAO') realizados += 1;
+    if (flag === 'SIM') produtivos += 1;
+    if (flag === 'NAO') improdutivos += 1;
+
+    usPrev += toNumberSafe(obterValorPrimeiro(row, ['US_PREV', 'US PREV']));
+    usExec += toNumberSafe(obterValorPrimeiro(row, ['US_EXEC', 'US EXEC']));
+
+    const acionamentoRaw = obterValorPrimeiro(row, ['DATA_ACIONAMENTO', 'ACIONAMENTO', 'DATA ACIONAMENTO']);
+    const acionamentoTxt = obterHoraTexto(acionamentoRaw);
+    const acionamentoMin = horaParaMinutos(acionamentoTxt);
+    if (Number.isFinite(acionamentoMin) && acionamentoMin < primeiroAtendimentoMin) {
+      primeiroAtendimentoMin = acionamentoMin;
+      primeiroAtendimento = acionamentoTxt;
+    }
+
+    const fimTxt = obterHoraTexto(obterReferenciaFinalServico(row));
+    const fimMin = horaParaMinutos(fimTxt);
+    if (Number.isFinite(fimMin) && fimMin > ultimoAtendimentoMin) {
+      ultimoAtendimentoMin = fimMin;
+      ultimoAtendimento = fimTxt;
+    }
+  });
+
+  const metasPorEquipe = new Map();
+  reportRows.forEach((row) => {
+    const codigo = String(obterCodigoEquipeLinha(row) || '').trim();
+    if (!codigo) return;
+    const meta = toNumberSafe(obterValorPrimeiro(row, ['META', 'Meta Prog.', 'Meta']));
+    metasPorEquipe.set(codigo, Math.max(Number(metasPorEquipe.get(codigo) || 0), meta));
+  });
+  const metaDia = Array.from(metasPorEquipe.values()).reduce((acc, meta) => acc + meta, 0);
+
+  return {
+    designados: rows.length,
+    realizados,
+    metaDia,
+    usPrev,
+    usExec,
+    produtivos,
+    improdutivos,
+    percImpedimento: calcularPercentualImpedimento(rows),
+    primeiroAtendimento,
+    ultimoAtendimento
+  };
+}
+
+function inserirResumoControleServicoModal(rows = []) {
+  document.getElementById('controleServicoResumoModal')?.remove();
+  if (!equipesModal) return;
+
+  const tabelaWrap = equipesModal.querySelector('.andon-modal-table-wrap');
+  if (!tabelaWrap) return;
+
+  equipesModal.classList.add('andon-modal-controle-servico');
+  const resumo = calcularResumoControleServicoModal(rows);
+  const cards = [
+    ['SERVICOS DESIGNADOS', formatInt(resumo.designados)],
+    ['SERVICOS REALIZADOS', formatInt(resumo.realizados)],
+    ['META DO DIA', formatNumber3(resumo.metaDia)],
+    ['U.S PREVISTAS', formatNumber3(resumo.usPrev)],
+    ['U.S EXECUTADAS', formatNumber3(resumo.usExec)],
+    ['PRODUTIVOS', formatInt(resumo.produtivos)],
+    ['IMPRODUTIVOS', formatInt(resumo.improdutivos)],
+    ['% IMPEDIMENTO', formatPercent(resumo.percImpedimento), resumo.percImpedimento > 0 ? 'alerta' : 'ok'],
+    ['1 ATENDIMENTO', resumo.primeiroAtendimento],
+    ['ULTIMO ATENDIMENTO', resumo.ultimoAtendimento]
+  ];
+
+  tabelaWrap.insertAdjacentHTML('beforebegin', `
+    <div class="andon-controle-servico-kpis" id="controleServicoResumoModal">
+      ${cards.map(([label, value, status]) => `
+        <div class="andon-controle-servico-kpi">
+          <div class="andon-controle-servico-kpi-title">${label}</div>
+          <div class="andon-controle-servico-kpi-value ${status ? `is-${status}` : ''}">${value}</div>
+        </div>
+      `).join('')}
+    </div>
+  `);
 }
 
 function obterCodigosEquipesUoAtual() {
@@ -730,53 +1243,136 @@ function abrirModalEquipesDLoteProd(options = {}) {
   if (!equipesModal || !equipesModalBody) return;
   aplicarModalTelaCheia(true);
 
+  const somenteD = options.somenteD !== false;
   const codigosUoAtual = obterCodigosEquipesUoAtual();
-  const rowsBase = Array.isArray(options.rows) ? options.rows : filtrarLoteProdEquipesDRowsAndon();
-  const rows = rowsBase.filter((row) => {
+  const reportRowsModal = options.reportRows || filtrarReportRowsAndon();
+  const codigosDwm = obterEquipesDBaseTotal(reportRowsModal).equipesD;
+  const datasDwmPorCodigo = new Map();
+  const chavesDwm = new Set();
+  const obterChaveComparativo = (codigo, dataIso = '') => `${String(codigo || '').trim()}|${dataIso || ''}`;
+  reportRowsModal.forEach((row) => {
+    const codigo = String(obterCodigoEquipeLinha(row) || '').trim();
+    if (!codigo || !codigosDwm.has(codigo)) return;
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+    if (dataIso) {
+      if (!datasDwmPorCodigo.has(codigo)) datasDwmPorCodigo.set(codigo, new Set());
+      datasDwmPorCodigo.get(codigo).add(dataIso);
+    }
+    chavesDwm.add(obterChaveComparativo(codigo, dataIso));
+  });
+  const rowsBase = Array.isArray(options.rows)
+    ? options.rows
+    : (somenteD ? filtrarLoteProdEquipesDRowsAndon() : filtrarLoteProdEquipesRowsAndon());
+  const rowsLoteFiltradas = rowsBase.filter((row) => {
     if (options.codigos && options.codigos.size) return options.codigos.has(obterCodigoEquipeLote(row));
     if (!codigosUoAtual) return true;
     return codigosUoAtual.has(obterCodigoEquipeLote(row));
   });
-  const mapaNomes = obterMapaNomesEquipesReport(options.reportRows || filtrarReportRowsAndon());
+  const mapaLote = new Map();
+  const codigosLote = new Set();
+  rowsLoteFiltradas.forEach((row) => {
+    const codigo = obterCodigoEquipeLote(row);
+    if (!codigo) return;
+    const dataLote = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+    codigosLote.add(codigo);
+    const chave = obterChaveComparativo(codigo, dataLote);
+    const faixa = String(obterValorPrimeiro(row, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || '').trim().toUpperCase();
+    const atual = mapaLote.get(chave) || mapaLote.get(obterChaveComparativo(codigo, ''));
+    if (!atual || faixa === 'D') mapaLote.set(chave, row);
+  });
+  const rows = somenteD
+    ? [
+        ...Array.from(chavesDwm).map((chave) => {
+          const [codigo, dataIso = ''] = chave.split('|');
+          return mapaLote.get(chave) || mapaLote.get(obterChaveComparativo(codigo, '')) || {
+            COD_EQUIPE: String(codigo),
+            DATA: dataIso,
+            _SOMENTE_WM: true
+          };
+        }),
+        ...rowsLoteFiltradas
+          .filter((row) => {
+            const codigo = obterCodigoEquipeLote(row);
+            const dataLote = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+            return codigo && !chavesDwm.has(obterChaveComparativo(codigo, dataLote)) && !chavesDwm.has(obterChaveComparativo(codigo, ''));
+          })
+          .map((row) => ({ ...row, _SOMENTE_LOTE: true }))
+      ]
+    : rowsLoteFiltradas;
+  const mapaNomes = obterMapaNomesEquipesReport(reportRowsModal);
+  const mapaSupervisor = new Map();
+  reportRowsModal.forEach((reportRow) => {
+    const codigo = String(obterCodigoEquipeLinha(reportRow) || '').trim();
+    if (!codigo || mapaSupervisor.has(codigo)) return;
+    mapaSupervisor.set(codigo, String(obterValorPrimeiro(reportRow, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']) || '-').trim() || '-');
+  });
+  const mapaWm = new Map(
+    montarLinhasModalEquipes(reportRowsModal, 'todas', filtrarControleRowsAndon())
+      .map((item) => [String(item.codigo || '').trim(), item])
+      .filter(([codigo]) => Boolean(codigo))
+  );
   renderCabecalhoModalEquipesDLoteProd();
 
-  if (equipesModalTitle) equipesModalTitle.textContent = options.title || 'Equipes D Lote Prod.';
+  if (equipesModalTitle) equipesModalTitle.textContent = options.title || (somenteD ? 'Equipes D Lote Prod.' : 'Total Equipes Lote Prod.');
+
+  const rowsOrdenadas = [...rows].sort((a, b) => {
+    const faixaA = String(obterValorPrimeiro(a, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || '').trim().toUpperCase();
+    const faixaB = String(obterValorPrimeiro(b, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || '').trim().toUpperCase();
+    return compararFaixaDiaDesc({ ...a, faixaDia: faixaA }, { ...b, faixaDia: faixaB });
+  });
+  const totalDwm = somenteD ? codigosDwm.size : rows.length;
+  const totalDLoteNoComparativo = somenteD ? codigosLote.size : rows.length;
+  const somenteWm = somenteD ? rows.filter((row) => row._SOMENTE_WM).length : 0;
+  const somenteLote = somenteD ? rows.filter((row) => row._SOMENTE_LOTE).length : 0;
   if (equipesModalMeta) {
-    equipesModalMeta.textContent = options.meta || `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(rows.length)}`;
+    equipesModalMeta.textContent = options.meta && !somenteD ? options.meta : (somenteD
+      ? `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | D WM: ${formatInt(totalDwm)} | D Lote: ${formatInt(totalDLoteNoComparativo)} | Somente WM: ${formatInt(somenteWm)} | Somente Lote: ${formatInt(somenteLote)}`
+      : `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(rows.length)}`);
   }
 
-  if (!rows.length) {
-    equipesModalBody.innerHTML = `<tr><td colspan="8" class="andon-modal-empty">Nenhuma equipe D encontrada no lote produtivo.</td></tr>`;
-  } else {
-    const rowsOrdenadas = [...rows].sort((a, b) => {
-      const faixaA = String(obterValorPrimeiro(a, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || '').trim().toUpperCase();
-      const faixaB = String(obterValorPrimeiro(b, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || '').trim().toUpperCase();
-      return compararFaixaDiaDesc({ ...a, faixaDia: faixaA }, { ...b, faixaDia: faixaB });
-    });
-
-    equipesModalBody.innerHTML = rowsOrdenadas.map((row) => {
+  renderizarModalBodyEmLotes(
+    rowsOrdenadas,
+    (row) => {
       const codigo = obterCodigoEquipeLote(row);
-      const metaDia = toNumberSafe(obterValorPrimeiro(row, ['META', 'Meta']));
-      const producaoDia = toNumberSafe(obterValorPrimeiro(row, ['VALOR_US', 'Valor_US', 'valor_us']));
-      const metaMes = toNumberSafe(obterValorPrimeiro(row, ['META_MES', 'Meta_Mes', 'meta_mes']));
-      const producaoMes = toNumberSafe(obterValorPrimeiro(row, ['VALOR_US_MES', 'Valor_US_Mes', 'valor_us_mes']));
-      const percentualDia = metaDia > 0 ? (producaoDia / metaDia) * 100 : 0;
-      const percentualMes = metaMes > 0 ? (producaoMes / metaMes) * 100 : 0;
+      const wm = mapaWm.get(String(codigo || '').trim()) || {};
+      const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+      const dataTxt = dataIso ? dataIso.split('-').reverse().join('/') : '-';
+      const metaWm = Number(wm.metaDia || 0);
+      const producaoWm = Number(wm.prodDia || 0);
+      const percentualWm = metaWm > 0 ? (producaoWm / metaWm) * 100 : 0;
+      const faixaWm = wm.faixaDia || classificarFaixa(percentualWm);
+      const metaLote = toNumberSafe(obterValorPrimeiro(row, ['META', 'Meta']));
+      const producaoLote = toNumberSafe(obterValorPrimeiro(row, ['VALOR_US', 'Valor_US', 'valor_us']));
+      const percentualLote = metaLote > 0 ? (producaoLote / metaLote) * 100 : 0;
+      const faixaLoteFallback = metaLote > 0 ? classificarFaixa(percentualLote) : '-';
+      const faixaLote = String(obterValorPrimeiro(row, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || faixaLoteFallback || '-').trim().toUpperCase();
+      const comparativo = row._SOMENTE_WM ? 'SOMENTE WM' : (row._SOMENTE_LOTE ? 'SOMENTE LOTE' : 'WM E LOTE');
 
       return `
         <tr>
-          <td>${mapaNomes.get(codigo) || codigo || '-'}</td>
-          <td>${formatNumber3Scale100(metaDia)}</td>
-          <td>${formatNumber3Scale100(producaoDia)}</td>
-          <td>${formatNumber3Scale100(metaMes)}</td>
-          <td>${formatNumber3Scale100(producaoMes)}</td>
-          <td class="andon-faixa faixa-${String(obterValorPrimeiro(row, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || 'D').trim().toUpperCase()}">${String(obterValorPrimeiro(row, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || 'D').trim().toUpperCase()}</td>
-          <td>${formatPercent(percentualDia)}</td>
-          <td>${formatPercent(percentualMes)}</td>
+          <td>${dataTxt}</td>
+          <td>${String(obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']) || mapaSupervisor.get(String(codigo || '').trim()) || '-')}</td>
+          <td>${mapaNomes.get(codigo) || wm.equipe || codigo || '-'}</td>
+          <td>${formatNumber3(metaWm)}</td>
+          <td>${formatNumber3(producaoWm)}</td>
+          <td class="andon-faixa faixa-${faixaWm || '-'}">${faixaWm || '-'}</td>
+          <td>${formatPercent(percentualWm)}</td>
+          <td>${formatNumber3Scale100(producaoLote)}</td>
+          <td class="andon-faixa faixa-${faixaLote}">${faixaLote}</td>
+          <td>${formatPercent(percentualLote)}</td>
+          <td>${wm.inicioJornada || '-'}</td>
+          <td>${wm.inicioRefeicao || '-'}</td>
+          <td>${wm.terminoRefeicao || '-'}</td>
+          <td>${wm.primeiroAtendimento || '-'}</td>
+          <td>${wm.ultimoAtendimento || '-'}</td>
+          <td>${wm.fimJornada || '-'}</td>
+          <td>${wm.jornadaProdutiva || '-'}</td>
+          <td>${comparativo}</td>
         </tr>
       `;
-    }).join('');
-  }
+    },
+    `<tr><td colspan="18" class="andon-modal-empty">Nenhuma equipe${somenteD ? ' D' : ''} encontrada no lote produtivo.</td></tr>`
+  );
 
   equipesModal.classList.remove('hidden');
 }
@@ -1009,10 +1605,9 @@ function abrirModalEquipesAndonContexto({
     equipesModalMeta.textContent = meta || `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Registros: ${formatInt(lista.length)}`;
   }
 
-  if (!lista.length) {
-    equipesModalBody.innerHTML = `<tr><td colspan="12" class="andon-modal-empty">Nenhuma equipe encontrada para este filtro.</td></tr>`;
-  } else {
-    equipesModalBody.innerHTML = lista.map((item) => `
+  renderizarModalBodyEmLotes(
+    lista,
+    (item) => `
       <tr>
         <td>${item.equipe}</td>
         <td>${formatNumber3(item.metaDia)}</td>
@@ -1027,14 +1622,304 @@ function abrirModalEquipesAndonContexto({
         <td>${item.fimJornada || '-'}</td>
         <td>${item.jornadaProdutiva || '-'}</td>
       </tr>
-    `).join('');
-  }
+    `,
+    `<tr><td colspan="12" class="andon-modal-empty">Nenhuma equipe encontrada para este filtro.</td></tr>`
+  );
 
   equipesModal.classList.remove('hidden');
 }
 
 function abrirModalEquipesAndon(filtro = 'todas') {
   return abrirModalEquipesAndonContexto({ filtro });
+}
+
+function formatarDataBrAndon(value) {
+  const dataIso = normalizarDataIso(value);
+  return dataIso ? dataIso.split('-').reverse().join('/') : '-';
+}
+
+function calcularResumoServicos13hPorEquipe(controleRows = []) {
+  const limite13h = 13 * 60;
+  const mapa = new Map();
+
+  controleRows.forEach((row) => {
+    const codigo = String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim();
+    if (!codigo) return;
+
+    const horaDesignacao = horaParaMinutos(obterValorPrimeiro(row, ['DATA_DESIGNACAO', 'DESIGNACAO', 'DATA DESIGNACAO', 'DATA_ATUALIZACAO']));
+    if (!Number.isFinite(horaDesignacao) || horaDesignacao > limite13h) return;
+
+    const item = mapa.get(codigo) || {
+      designados: 0,
+      servicos: 0,
+      produtivos: 0,
+      improdutivos: 0
+    };
+    const flag = normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS']));
+
+    item.designados += 1;
+    if (flag === 'SIM' || flag === 'NAO') item.servicos += 1;
+    if (flag === 'SIM') item.produtivos += 1;
+    if (flag === 'NAO') item.improdutivos += 1;
+
+    mapa.set(codigo, item);
+  });
+
+  return mapa;
+}
+
+function montarLinhasModalEquipesAcordadas(reportRows = filtrarReportRowsAndon(), controleRows = filtrarControleRowsAndon(), tipo = 'acordadas') {
+  const codigosSdca = obterCodigosSdcaPorTipo(reportRows, tipo);
+  const mapaJustificativas = new Map();
+  if (tipo === 'justificadas') {
+    const { mapa: mapaHoraAtual } = obterResumoEquipesHoraAtual(reportRows);
+    const codigosVisiveis = new Set(Array.from(mapaHoraAtual.keys()).map((codigo) => String(codigo)));
+    obterRegistrosSdcaAndon(codigosVisiveis).forEach((registro) => {
+      Object.values(registro && registro.justificativas || {}).forEach((item) => {
+        const codigo = String(item && item.codigo || '').trim();
+        const texto = String(item && item.justificativa || '').trim();
+        if (codigo && texto && codigosSdca.has(codigo)) mapaJustificativas.set(codigo, texto);
+      });
+    });
+  }
+  const mapaJornada = new Map(
+    montarLinhasModalEquipes(reportRows, 'todas', controleRows)
+      .map((item) => [String(item.codigo || '').trim(), item])
+      .filter(([codigo]) => Boolean(codigo))
+  );
+  const mapaServicos13h = calcularResumoServicos13hPorEquipe(controleRows);
+  const mapa = new Map();
+  const horas13 = obterHorasAcumuladasAndon('13');
+
+  reportRows.forEach((row) => {
+    const codigo = obterCodigoEquipeLinha(row);
+    if (!codigo || !codigosSdca.has(String(codigo))) return;
+
+    const supervisor = String(obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']) || '-').trim() || '-';
+    const equipe = String(obterValorPrimeiro(row, ['Nome', 'NOME_EQUIPE', 'NOME']) || codigo || '-').trim() || '-';
+    const frota = String(obterValorPrimeiro(row, ['FROTA', 'Frota', 'PREFIXO', 'Prefixo', 'PLACA', 'Placa']) || '-').trim() || '-';
+    const metaLinha = ajustarMetaClusterMtamiAndon(
+      toNumberSafe(obterValorPrimeiro(row, ['Meta Prog.', 'META PROG', 'META_PROG'])),
+      supervisor,
+      equipe
+    );
+    const producaoLinha = toNumberSafe(obterValorPrimeiro(row, ['Produção', 'ProduÃ§Ã£o', 'PRODUÇÃO', 'PRODUÃ‡ÃƒO', 'PRODUCAO']));
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA']));
+    const hora = obterHoraLinha(row);
+
+    const atual = mapa.get(codigo) || {
+      codigo,
+      dataIso: '',
+      supervisor,
+      frota,
+      equipe,
+      metaDia: 0,
+      prod13: 0,
+      prodDia: 0
+    };
+
+    if (dataIso && (!atual.dataIso || dataIso > atual.dataIso)) atual.dataIso = dataIso;
+    atual.supervisor = supervisor || atual.supervisor;
+    atual.frota = frota || atual.frota;
+    atual.equipe = equipe || atual.equipe;
+    atual.metaDia = Math.max(atual.metaDia, metaLinha);
+    atual.prodDia = Math.max(atual.prodDia, producaoLinha);
+    if (hora === '13') atual.prod13 = Math.max(atual.prod13, producaoLinha);
+
+    mapa.set(codigo, atual);
+  });
+
+  return Array.from(mapa.values()).map((item) => {
+    const jornada = mapaJornada.get(String(item.codigo || '').trim()) || {};
+    const servicos13h = mapaServicos13h.get(String(item.codigo || '').trim()) || {
+      designados: 0,
+      servicos: 0,
+      produtivos: 0,
+      improdutivos: 0
+    };
+    const perc13 = Number(item.metaDia || 0) > 0 ? (Number(item.prod13 || 0) / Number(item.metaDia || 0)) * 100 : 0;
+    const previsaoProducao = horas13 > 0 ? (Number(item.prod13 || 0) / horas13) * 9 : 0;
+    const previsaoPercentual = Number(item.metaDia || 0) > 0 ? (previsaoProducao / Number(item.metaDia || 0)) * 100 : 0;
+    const percDia = Number(item.metaDia || 0) > 0 ? (Number(item.prodDia || 0) / Number(item.metaDia || 0)) * 100 : 0;
+    const percImprod13 = servicos13h.servicos > 0 ? (servicos13h.improdutivos / servicos13h.servicos) * 100 : 0;
+
+    return {
+      ...item,
+      faixa13: classificarFaixa(perc13),
+      perc13,
+      previsaoProducao,
+      previsaoPercentual,
+      previsaoFaixaDia: classificarFaixa(previsaoPercentual),
+      faixaDia: classificarFaixa(percDia),
+      percDia,
+      servicos13h,
+      percImprod13,
+      justificativa: mapaJustificativas.get(String(item.codigo || '').trim()) || '-',
+      inicioJornada: jornada.inicioJornada || '-',
+      primeiroAtendimento: jornada.primeiroAtendimento || '-',
+      ultimoAtendimento: jornada.ultimoAtendimento || '-',
+      fimJornada: jornada.fimJornada || '-',
+      jornadaProdutiva: jornada.jornadaProdutiva || '-'
+    };
+  }).sort((a, b) => {
+    const diffSupervisor = String(a.supervisor || '').localeCompare(String(b.supervisor || ''), 'pt-BR', { sensitivity: 'base' });
+    if (diffSupervisor !== 0) return diffSupervisor;
+    return String(a.equipe || '').localeCompare(String(b.equipe || ''), 'pt-BR', { sensitivity: 'base' });
+  });
+}
+
+function abrirModalEquipesAcordadasDetalhado() {
+  if (!equipesModal || !equipesModalBody) return;
+  aplicarModalTelaCheia(true);
+
+  const reportRows = filtrarReportRowsAndon();
+  const controleRows = filtrarControleRowsAndon();
+  const rows = montarLinhasModalEquipesAcordadas(reportRows, controleRows);
+
+  renderCabecalhoModalGenerico([
+    { label: 'DATA' },
+    { label: 'SUPERVISOR' },
+    { label: 'Equipes' },
+    { label: 'Meta' },
+    { label: 'Produção' },
+    { label: 'Faixa 13H' },
+    { label: '% PROD.DIA 13 H' },
+    { label: 'Previsão Produção' },
+    { label: 'Previsão %Meta' },
+    { label: 'Previsão Faixa Dia' },
+    { label: 'Produção' },
+    { label: 'Faixa Dia' },
+    { label: '% PROD.DIA' },
+    { label: 'Designados 13H' },
+    { label: 'Serviços 13H' },
+    { label: 'Produtivos 13 H' },
+    { label: 'Improdutivos 13 H' },
+    { label: '% IMPROD. 13 H' },
+    { label: 'Início Jornada' },
+    { label: '1º Atendimento' },
+    { label: 'Últ. Atendimento' },
+    { label: 'Fim Jornada' },
+    { label: 'Jornada Produtiva' }
+  ]);
+
+  if (equipesModalTitle) equipesModalTitle.textContent = 'Equipes Acordadas';
+  if (equipesModalMeta) {
+    equipesModalMeta.textContent = `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(rows.length)}`;
+  }
+
+  renderizarModalBodyEmLotes(
+    rows,
+    (row) => `
+      <tr>
+        <td>${formatarDataBrAndon(row.dataIso)}</td>
+        <td>${row.supervisor || '-'}</td>
+        <td>${row.equipe || '-'}</td>
+        <td>${formatNumber3(row.metaDia)}</td>
+        <td>${formatNumber3(row.prod13)}</td>
+        <td class="andon-faixa faixa-${row.faixa13 || '-'}">${row.faixa13 || '-'}</td>
+        <td>${formatPercent(row.perc13 || 0)}</td>
+        <td>${formatNumber3(row.previsaoProducao)}</td>
+        <td>${formatPercent(row.previsaoPercentual || 0)}</td>
+        <td class="andon-faixa faixa-${row.previsaoFaixaDia || '-'}">${row.previsaoFaixaDia || '-'}</td>
+        <td>${formatNumber3(row.prodDia)}</td>
+        <td class="andon-faixa faixa-${row.faixaDia || '-'}">${row.faixaDia || '-'}</td>
+        <td>${formatPercent(row.percDia || 0)}</td>
+        <td>${formatInt(row.servicos13h.designados)}</td>
+        <td>${formatInt(row.servicos13h.servicos)}</td>
+        <td>${formatInt(row.servicos13h.produtivos)}</td>
+        <td>${formatInt(row.servicos13h.improdutivos)}</td>
+        <td>${formatPercent(row.percImprod13 || 0)}</td>
+        <td>${row.inicioJornada || '-'}</td>
+        <td>${row.primeiroAtendimento || '-'}</td>
+        <td>${row.ultimoAtendimento || '-'}</td>
+        <td>${row.fimJornada || '-'}</td>
+        <td>${row.jornadaProdutiva || '-'}</td>
+      </tr>
+    `,
+    '<tr><td colspan="23" class="andon-modal-empty">Nenhuma equipe acordada encontrada para o filtro atual.</td></tr>'
+  );
+
+  equipesModal.classList.remove('hidden');
+}
+
+function abrirModalEquipesJustificadasDetalhado() {
+  if (!equipesModal || !equipesModalBody) return;
+  aplicarModalTelaCheia(true);
+
+  const reportRows = filtrarReportRowsAndon();
+  const controleRows = filtrarControleRowsAndon();
+  const rows = montarLinhasModalEquipesAcordadas(reportRows, controleRows, 'justificadas');
+
+  renderCabecalhoModalGenerico([
+    { label: 'Data' },
+    { label: 'Supervisor' },
+    { label: 'Cód. Eqp.' },
+    { label: 'Frota' },
+    { label: 'Equipe' },
+    { label: 'Meta' },
+    { label: 'Prod.' },
+    { label: 'Faixa 13 H' },
+    { label: '% Prod. Dia 13 h' },
+    { label: 'Justificativa' },
+    { label: 'Prev. Prod.' },
+    { label: 'Prev. %Meta' },
+    { label: 'Prev. Faixa Dia' },
+    { label: 'Prod.' },
+    { label: 'Faixa Dia' },
+    { label: '% PROD.DIA' },
+    { label: 'Desig. 13 H' },
+    { label: 'Serv. 13 H' },
+    { label: 'Prod. 13 H' },
+    { label: 'Improd. 13 H' },
+    { label: '% IMPROD. 13 H' },
+    { label: 'Início Jornada' },
+    { label: '1º Atendimento' },
+    { label: 'Últ. Atend.' },
+    { label: 'Fim Jornada' },
+    { label: 'Jornada Prod.' }
+  ]);
+
+  if (equipesModalTitle) equipesModalTitle.textContent = 'Equipes Justificadas';
+  if (equipesModalMeta) {
+    equipesModalMeta.textContent = `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(rows.length)}`;
+  }
+
+  renderizarModalBodyEmLotes(
+    rows,
+    (row) => `
+      <tr>
+        <td>${formatarDataBrAndon(row.dataIso)}</td>
+        <td>${row.supervisor || '-'}</td>
+        <td>${row.codigo || '-'}</td>
+        <td>${row.frota || '-'}</td>
+        <td>${row.equipe || '-'}</td>
+        <td>${formatNumber3(row.metaDia)}</td>
+        <td>${formatNumber3(row.prod13)}</td>
+        <td class="andon-faixa faixa-${row.faixa13 || '-'}">${row.faixa13 || '-'}</td>
+        <td>${formatPercent(row.perc13 || 0)}</td>
+        <td>${row.justificativa || '-'}</td>
+        <td>${formatNumber3(row.previsaoProducao)}</td>
+        <td>${formatPercent(row.previsaoPercentual || 0)}</td>
+        <td class="andon-faixa faixa-${row.previsaoFaixaDia || '-'}">${row.previsaoFaixaDia || '-'}</td>
+        <td>${formatNumber3(row.prodDia)}</td>
+        <td class="andon-faixa faixa-${row.faixaDia || '-'}">${row.faixaDia || '-'}</td>
+        <td>${formatPercent(row.percDia || 0)}</td>
+        <td>${formatInt(row.servicos13h.designados)}</td>
+        <td>${formatInt(row.servicos13h.servicos)}</td>
+        <td>${formatInt(row.servicos13h.produtivos)}</td>
+        <td>${formatInt(row.servicos13h.improdutivos)}</td>
+        <td>${formatPercent(row.percImprod13 || 0)}</td>
+        <td>${row.inicioJornada || '-'}</td>
+        <td>${row.primeiroAtendimento || '-'}</td>
+        <td>${row.ultimoAtendimento || '-'}</td>
+        <td>${row.fimJornada || '-'}</td>
+        <td>${row.jornadaProdutiva || '-'}</td>
+      </tr>
+    `,
+    '<tr><td colspan="26" class="andon-modal-empty">Nenhuma equipe justificada encontrada para o filtro atual.</td></tr>'
+  );
+
+  equipesModal.classList.remove('hidden');
 }
 
 function obterCodigosEquipesSemRefeicao(reportRows = filtrarReportRowsAndon(), listaEquipes = null) {
@@ -1194,13 +2079,14 @@ function normalizarFlagServico(value) {
 }
 
 function calcularEficiencia(rows = [], controleRows = []) {
-  const codigosEquipes = obterCodigosReportRows(rows);
+  const codigosEquipes = new Set();
   const codigosComServico = new Set();
   let servicosProdutivos = 0;
   let servicosImprodutivos = 0;
 
   controleRows.forEach((row) => {
     const codigo = String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim();
+    if (codigo) codigosEquipes.add(codigo);
     if (codigo) codigosComServico.add(codigo);
 
     const flag = normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS']));
@@ -1212,7 +2098,7 @@ function calcularEficiencia(rows = [], controleRows = []) {
   const servicosDesignados = controleRows.length;
   const servicosExecutados = servicosProdutivos + servicosImprodutivos;
   const semServico = Array.from(codigosEquipes).filter((codigo) => !codigosComServico.has(codigo)).length;
-  const percImprodutivo = servicosDesignados > 0 ? (servicosImprodutivos / servicosDesignados) * 100 : 0;
+  const percImprodutivo = servicosExecutados > 0 ? (servicosImprodutivos / servicosExecutados) * 100 : 0;
   const mediaServicoPorEqp = totalEfetiva > 0 ? servicosDesignados / totalEfetiva : 0;
 
   return {
@@ -1506,9 +2392,7 @@ function abrirModalAbsenteismo(options = {}) {
 }
 
 function obterRowsControleServicoPorTipo(tipo = 'todos') {
-  const rowsReport = filtrarReportRowsAndon();
-  const codigos = obterCodigosReportRows(rowsReport);
-  const controleRows = obterControleRowsPorCodigos(codigos);
+  const controleRows = filtrarControleRowsAndon();
 
   if (tipo === 'produtivos') {
     return controleRows.filter((row) => normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS'])) === 'SIM');
@@ -1546,35 +2430,111 @@ function abrirModalControleServico(tipo = 'todos', title = 'Serviços') {
   });
 }
 
-function abrirModalResumoControleServicoPorEquipe() {
-  const reportRows = filtrarReportRowsAndon();
-  const controleRows = filtrarControleRowsAndon();
-  const mapa = new Map();
+async function obterRowsControleServicoModalDireto(tipo = 'todos') {
+  const periodo = obterPeriodoFiltroAndon();
+  const params = new URLSearchParams();
+  if (periodo.inicio) params.set('dataInicio', periodo.inicio);
+  if (periodo.fim) params.set('dataFim', periodo.fim);
+  if (headerSelectedUo) params.set('uo', String(headerSelectedUo).replace(/[^\d]/g, ''));
+  params.set('limit', '50000');
 
-  reportRows.forEach((row) => {
+  try {
+    const resp = await fetch(`/api/controle-servico?${params.toString()}`, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json().catch(() => ({}));
+    const rows = Array.isArray(payload && payload.rows) ? payload.rows : [];
+    andonControleRows = rows;
+    andonControleLoadedKey = obterChavePeriodoFiltroAndon();
+    limparCacheAndon();
+
+    if (tipo === 'produtivos') {
+      return rows.filter((row) => normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS'])) === 'SIM');
+    }
+    if (tipo === 'improdutivos') {
+      return rows.filter((row) => normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS'])) === 'NAO');
+    }
+    if (tipo === 'executados') {
+      return rows.filter((row) => ['SIM', 'NAO'].includes(normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS']))));
+    }
+    return rows;
+  } catch (error) {
+    console.error('Erro ao buscar controle_servico para modal:', error);
+    return obterRowsControleServicoPorTipo(tipo);
+  }
+}
+
+async function abrirModalControleServicoModelo(tipo = 'todos', title = 'Servicos') {
+  if (!equipesModal || !equipesModalBody) return;
+  const rows = await obterRowsControleServicoModalDireto(tipo);
+  const columns = [
+    { label: 'Data Atualizacao', value: (row) => String(obterValorPrimeiro(row, ['DATA_ATUALIZACAO', 'DATA_ATUALIZACAO_D', 'DATA ATUALIZACAO']) || '-') },
+    { label: 'U.O.', value: (row) => String(obterValorPrimeiro(row, ['COD_UO', 'UO']) || '-') },
+    { label: 'Cod. Equipe', value: (row) => String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '-') },
+    { label: 'Equipe', value: (row) => String(obterValorPrimeiro(row, ['NOME', 'NOME_EQUIPE']) || '-') },
+    { label: 'Servico', value: (row) => String(obterValorPrimeiro(row, ['NUM_SERVICO', 'SERVICO']) || '-') },
+    { label: 'Tipo Servico', value: (row) => String(obterValorPrimeiro(row, ['TIPO_SERVICO']) || '-') },
+    { label: 'Situacao', value: (row) => String(obterValorPrimeiro(row, ['SITUACAO']) || '-') },
+    { label: 'Produtivo', value: (row) => normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS'])) || '-' },
+    { label: 'COD. ATIV.', value: (row) => String(obterValorPrimeiro(row, ['COD_ATIV', 'COD. ATIV.', 'COD_ATIVIDADE']) || '-') },
+    { label: 'US Prev.', value: (row) => formatNumber3(toNumberSafe(obterValorPrimeiro(row, ['US_PREV', 'US PREV']))) },
+    { label: 'US Exec.', value: (row) => formatNumber3(toNumberSafe(obterValorPrimeiro(row, ['US_EXEC', 'US EXEC']))) },
+    { label: 'Designacao', value: (row) => obterHoraTexto(obterValorPrimeiro(row, ['DATA_DESIGNACAO', 'DESIGNACAO', 'DATA DESIGNACAO'])) },
+    { label: 'Lancamento Lote', value: (row) => obterHoraTexto(obterValorPrimeiro(row, ['DATA_LANCAMENTO_LOTE', 'LANCAMENTO_LOTE', 'LANCAMENTO LOTE', 'DATA_LANCAMENTO'])) || '-' },
+    { label: 'Acionamento', value: (row) => obterHoraTexto(obterValorPrimeiro(row, ['DATA_ACIONAMENTO', 'ACIONAMENTO', 'DATA ACIONAMENTO'])) },
+    { label: 'Localizacao', value: (row) => obterHoraTexto(obterValorPrimeiro(row, ['DATA_LOCALIZACAO', 'LOCALIZACAO'])) },
+    { label: 'Termino', value: (row) => obterHoraTexto(obterValorPrimeiro(row, ['DATA_TERMINO_REAL', 'ENCERRAMENTO', 'DATA_TERMINO'])) },
+    { label: 'AREA', value: (row) => String(obterValorPrimeiro(row, ['AREA', 'TIPO_AREA', 'TIPO AREA']) || '-') }
+  ];
+
+  aplicarModalTelaCheia(true);
+  renderCabecalhoModalGenerico(columns);
+  if (equipesModalTitle) equipesModalTitle.textContent = title;
+  if (equipesModalMeta) equipesModalMeta.textContent = `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Registros: ${formatInt(rows.length)}`;
+  renderizarModalTabelaPaginada(rows, columns);
+  equipesModal.classList.remove('hidden');
+  inserirResumoControleServicoModal(rows);
+}
+
+function abrirModalResumoControleServicoPorEquipe() {
+  const controleRows = filtrarControleRowsAndon();
+  const mapaSupervisoresReport = new Map();
+  filtrarReportRowsAndon().forEach((row) => {
     const codigo = String(obterCodigoEquipeLinha(row) || '').trim();
-    if (!codigo || mapa.has(codigo)) return;
-    mapa.set(codigo, {
-      codigo,
-      equipe: String(obterValorPrimeiro(row, ['Nome', 'NOME_EQUIPE', 'NOME']) || codigo),
-      designados: 0,
-      executados: 0,
-      produtivos: 0,
-      improdutivos: 0
-    });
+    if (!codigo || mapaSupervisoresReport.has(codigo)) return;
+    const supervisor = String(obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR', 'SUPERVISOR_EQUIPE']) || '').trim();
+    if (supervisor) mapaSupervisoresReport.set(codigo, supervisor);
   });
+  const mapa = new Map();
 
   controleRows.forEach((row) => {
     const codigo = String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim();
     if (!codigo) return;
+    const supervisorRow = String(obterValorPrimeiro(row, [
+      'SUPERVISOR - SETOR',
+      'NOME_SUPERVISOR',
+      'SUPERVISOR_EQUIPE',
+      'SUPERVISOR',
+      'NOME SUPERVISOR'
+    ]) || '').trim();
     const item = mapa.get(codigo) || {
       codigo,
-      equipe: String(obterValorPrimeiro(row, ['NOME', 'NOME_EQUIPE']) || codigo),
+      dataIso: normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data', 'DATA_ATUALIZACAO', 'DATA_DESIGNACAO'])),
+      supervisor: supervisorRow || mapaSupervisoresReport.get(codigo) || '-',
+      equipe: String(obterValorPrimeiro(row, ['NOME_EQUIPE', 'NOME', 'EQUIPE']) || codigo),
       designados: 0,
       executados: 0,
       produtivos: 0,
       improdutivos: 0
     };
+    const dataIsoRow = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data', 'DATA_ATUALIZACAO', 'DATA_DESIGNACAO']));
+    if (dataIsoRow && (!item.dataIso || dataIsoRow < item.dataIso)) item.dataIso = dataIsoRow;
+    if (!item.dataIso) item.dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data', 'DATA_ATUALIZACAO', 'DATA_DESIGNACAO']));
+    if (!item.supervisor || item.supervisor === '-') {
+      item.supervisor = supervisorRow || mapaSupervisoresReport.get(codigo) || '-';
+    }
+    if (!item.equipe || item.equipe === codigo) {
+      item.equipe = String(obterValorPrimeiro(row, ['NOME_EQUIPE', 'NOME', 'EQUIPE']) || codigo);
+    }
     const flag = normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS']));
     item.designados += 1;
     if (flag === 'SIM' || flag === 'NAO') item.executados += 1;
@@ -1591,7 +2551,10 @@ function abrirModalResumoControleServicoPorEquipe() {
   abrirModalTabelaGenerica({
     title: 'Total de Equipes Efetiva - Eficiência',
     meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(rows.length)}`,
+    rows,
     columns: [
+      { label: 'DATA', value: (row) => formatarDataBrAndon(row.dataIso) },
+      { label: 'SUPERVISOR', value: (row) => row.supervisor || '-' },
       { label: 'Cód. Equipe', value: (row) => row.codigo || '-' },
       { label: 'Equipe', value: (row) => row.equipe || '-' },
       { label: 'Serviços Desig.', value: (row) => formatInt(row.designados) },
@@ -1787,7 +2750,10 @@ function atualizarCardsEficiencia() {
   if (eficienciaValores['SERVICOS EXEC.']) eficienciaValores['SERVICOS EXEC.'].textContent = formatInt(eficiencia.servicosExecutados);
   if (eficienciaValores['SERVICOS PRODUTIVO']) eficienciaValores['SERVICOS PRODUTIVO'].textContent = formatInt(eficiencia.servicosProdutivos);
   if (eficienciaValores['SERVICOS IMPRODUTIVOS']) eficienciaValores['SERVICOS IMPRODUTIVOS'].textContent = formatInt(eficiencia.servicosImprodutivos);
-  if (eficienciaValores['% SERV. IMPROD.']) eficienciaValores['% SERV. IMPROD.'].textContent = formatPercent(eficiencia.percImprodutivo);
+  if (eficienciaValores['% SERV. IMPROD.']) {
+    eficienciaValores['% SERV. IMPROD.'].textContent = formatPercent(eficiencia.percImprodutivo);
+    aplicarCorPercentualKpi(eficienciaValores['% SERV. IMPROD.'], eficiencia.percImprodutivo);
+  }
   if (eficienciaValores['MED. SERVICO POR EQP.']) eficienciaValores['MED. SERVICO POR EQP.'].textContent = formatNumber2(eficiencia.mediaServicoPorEqp);
   if (eficienciaValores['EQUIPE SEM SERVICO']) eficienciaValores['EQUIPE SEM SERVICO'].textContent = formatInt(eficiencia.semServico);
 }
@@ -1866,14 +2832,27 @@ function obterLoteProdSupervisor(rows = []) {
   const codigos = obterCodigosReportRows(rows);
   const loteRows = filtrarLoteProdPorCodigos(filtrarLoteProdEquipesRowsAndon(), codigos);
   const loteDRows = filtrarLoteProdPorCodigos(filtrarLoteProdEquipesDRowsAndon(), codigos);
+  const baseTotal = obterEquipesDBaseTotal(rows);
+  const codigosDwm = baseTotal.equipesD;
+  const codigosLoteD = new Set(loteDRows.map((row) => obterCodigoEquipeLote(row)).filter(Boolean));
+  const somenteWm = Array.from(codigosDwm).filter((codigo) => !codigosLoteD.has(String(codigo))).length;
+  const somenteLote = Array.from(codigosLoteD).filter((codigo) => !codigosDwm.has(String(codigo))).length;
+  const wmELote = Array.from(codigosDwm).filter((codigo) => codigosLoteD.has(String(codigo))).length;
 
   return {
     codigos,
     rows: loteRows,
     rowsD: loteDRows,
     classificacao: calcularClassificacaoLoteProdEquipes(loteRows),
-    equipesD: loteDRows.length
+    equipesD: codigosLoteD.size,
+    wmELote,
+    somenteWm,
+    somenteLote
   };
+}
+
+function formatarComparativoLoteSupervisor(loteProd = {}) {
+  return `${formatInt(loteProd.equipesD || 0)} | S.WM ${formatInt(loteProd.somenteWm || 0)} | S.Lote ${formatInt(loteProd.somenteLote || 0)}`;
 }
 
 function calcularSdcaSupervisor(rows = []) {
@@ -1954,8 +2933,7 @@ function inicializarMetricasPerformanceSupervisor() {
               rows: loteProd.rowsD,
               codigos: loteProd.codigos,
               reportRows: rows,
-              title: `Equipes D Lote Prod. - ${card.dataset.supervisor || ''}`,
-              meta: `Supervisor: ${card.dataset.supervisor || '-'} | U.O.: ${card.dataset.uo || '-'} | Equipes: ${formatInt(loteProd.rowsD.length)}`
+              title: `Equipes D Lote Prod. - ${card.dataset.supervisor || ''}`
             });
             return;
           }
@@ -2121,7 +3099,11 @@ function atualizarSupervisorPerformanceCards() {
     if (performanceValores['classificacao-wm']) performanceValores['classificacao-wm'].textContent = formatClassificacao(percentualTotal);
     if (performanceValores['classificacao-lote']) performanceValores['classificacao-lote'].textContent = loteProd.classificacao;
     if (performanceValores['equipes-d-wm']) performanceValores['equipes-d-wm'].textContent = formatInt(baseTotal.equipesD.size);
-    if (performanceValores['equipes-d-lote']) performanceValores['equipes-d-lote'].textContent = formatInt(loteProd.equipesD);
+    if (performanceValores['equipes-d-lote']) {
+      performanceValores['equipes-d-lote'].classList.add('metric-value-compact');
+      performanceValores['equipes-d-lote'].textContent = formatarComparativoLoteSupervisor(loteProd);
+      performanceValores['equipes-d-lote'].title = `D Lote: ${formatInt(loteProd.equipesD)} | WM e Lote: ${formatInt(loteProd.wmELote)} | Somente WM: ${formatInt(loteProd.somenteWm)} | Somente Lote: ${formatInt(loteProd.somenteLote)}`;
+    }
     if (performanceValores['impedimento']) performanceValores['impedimento'].textContent = formatPercent(impedimento);
 
     const sdca = calcularSdcaSupervisor(rows);
@@ -2291,11 +3273,15 @@ function obterCodigosSdcaPorTipo(rows = [], tipo = 'acordadas') {
 
 function atualizarCardsPerformanceVazios() {
   if (perfTotalEquipes) perfTotalEquipes.textContent = '0';
+  if (perfTotalEquipesLote) perfTotalEquipesLote.textContent = '0';
   if (perfClassificacaoWm) perfClassificacaoWm.textContent = '--';
   if (perfClassificacaoLote) perfClassificacaoLote.textContent = '--';
+  aplicarCorFaixaKpi(cardPerfClassificacaoWm, '');
+  aplicarCorFaixaKpi(cardPerfClassificacaoLote, '');
   if (perfEquipesDWm) perfEquipesDWm.textContent = '0';
   if (perfEquipesDLote) perfEquipesDLote.textContent = '0';
   if (perfImpedimento) perfImpedimento.textContent = '0,00%';
+  aplicarCorPercentualKpi(perfImpedimento, 0);
 }
 
 function calcularPerformance(rows = []) {
@@ -2416,13 +3402,23 @@ function atualizarCardsSdca() {
   if (sdcaPercJustificadas) sdcaPercJustificadas.textContent = formatPercent(percJustificadas);
 }
 
+function supervisorViewEstaAberta() {
+  return Boolean(supervisorView && !supervisorView.classList.contains('hidden'));
+}
+
+function atualizarSupervisorPerformanceCardsSeVisivel() {
+  if (supervisorViewEstaAberta()) {
+    atualizarSupervisorPerformanceCards();
+  }
+}
+
 function atualizarDashboardAndon() {
   atualizarCardsPerformance();
   atualizarCardsSdca();
   atualizarCardsJornadaProdutiva();
   atualizarCardsJornadaTrabalho();
   atualizarCardsEficiencia();
-  atualizarSupervisorPerformanceCards();
+  atualizarSupervisorPerformanceCardsSeVisivel();
 
   const chavePeriodo = obterChavePeriodoFiltroAndon();
   if (andonControleLoadedKey !== chavePeriodo && !andonControleLoadingPromise) {
@@ -2430,7 +3426,7 @@ function atualizarDashboardAndon() {
       atualizarCardsPerformance();
       atualizarCardsJornadaProdutiva();
       atualizarCardsEficiencia();
-      atualizarSupervisorPerformanceCards();
+      atualizarSupervisorPerformanceCardsSeVisivel();
     });
   }
 
@@ -2438,14 +3434,14 @@ function atualizarDashboardAndon() {
   if (andonFolhaPontoLoadedKey !== chaveFolha && !andonFolhaPontoLoadingPromise) {
     carregarFolhaPontoAndon().then(() => {
       atualizarCardsJornadaTrabalho();
-      atualizarSupervisorPerformanceCards();
+      atualizarSupervisorPerformanceCardsSeVisivel();
     });
   }
 
   if (andonLoteProdEquipesLoadedKey !== chavePeriodo && !andonLoteProdEquipesLoadingPromise) {
     carregarLoteProdEquipesAndon().then(() => {
       atualizarCardsPerformance();
-      atualizarSupervisorPerformanceCards();
+      atualizarSupervisorPerformanceCardsSeVisivel();
     });
   }
 }
@@ -2470,6 +3466,7 @@ function atualizarCardsPerformance() {
   const reportRows = filtrarReportRowsAndon();
   const controleRows = filtrarControleRowsAndon();
   const loteProd = calcularResumoLoteProd(filtrarLoteProdRowsAndon());
+  const totalEquipesLote = calcularTotalEquipesLoteProd();
   const baseTotal = obterEquipesDBaseTotal(reportRows);
   const percentualImpedimento = calcularPercentualImpedimento(controleRows);
   const percentualTotal = baseTotal.totalMetaDia > 0
@@ -2477,11 +3474,16 @@ function atualizarCardsPerformance() {
     : NaN;
 
   if (perfTotalEquipes) perfTotalEquipes.textContent = formatInt(baseTotal.totalEquipes);
-  if (perfClassificacaoWm) perfClassificacaoWm.textContent = formatClassificacao(percentualTotal);
+  if (perfTotalEquipesLote) perfTotalEquipesLote.textContent = formatInt(totalEquipesLote);
+  const classificacaoWm = formatClassificacao(percentualTotal);
+  if (perfClassificacaoWm) perfClassificacaoWm.textContent = classificacaoWm;
+  aplicarCorFaixaKpi(cardPerfClassificacaoWm, Number.isFinite(percentualTotal) ? classificarFaixa(percentualTotal) : obterFaixaClassificacaoTexto(classificacaoWm));
   if (perfClassificacaoLote) perfClassificacaoLote.textContent = loteProd.classificacao;
+  aplicarCorFaixaKpi(cardPerfClassificacaoLote, obterFaixaClassificacaoTexto(loteProd.classificacao));
   if (perfEquipesDWm) perfEquipesDWm.textContent = formatInt(baseTotal.equipesD.size);
   if (perfEquipesDLote) perfEquipesDLote.textContent = formatInt(loteProd.equipesD);
   if (perfImpedimento) perfImpedimento.textContent = formatPercent(percentualImpedimento);
+  aplicarCorPercentualKpi(perfImpedimento, percentualImpedimento);
 }
 
 async function carregarDadosAndon() {
@@ -2501,6 +3503,7 @@ async function carregarDadosAndon() {
 
     const reportPayload = await reportResp.json();
     andonReportRows = Array.isArray(reportPayload && reportPayload.rows) ? reportPayload.rows : [];
+    limparCacheAndon();
 
     if (loteProdResp.ok) {
       const loteProdPayload = await loteProdResp.json();
@@ -2508,6 +3511,7 @@ async function carregarDadosAndon() {
     } else {
       andonLoteProdRows = [];
     }
+    limparCacheAndon();
 
     if (loteProdEquipesDResp.ok) {
       const loteProdEquipesDPayload = await loteProdEquipesDResp.json();
@@ -2517,6 +3521,7 @@ async function carregarDadosAndon() {
     } else {
       andonLoteProdEquipesDRows = [];
     }
+    limparCacheAndon();
 
     andonAcordosBase = acordosBanco && Object.keys(acordosBanco).length
       ? acordosBanco
@@ -2548,10 +3553,16 @@ async function carregarDadosAndon() {
     }
 
     renderHeaderUoOptions();
-    await carregarControleServicoAndon();
-    await carregarFolhaPontoAndon();
-    await carregarLoteProdEquipesAndon();
     atualizarDashboardAndon();
+    Promise.all([
+      carregarControleServicoAndon(),
+      carregarFolhaPontoAndon(),
+      carregarLoteProdEquipesAndon()
+    ]).then(() => {
+      atualizarDashboardAndon();
+    }).catch((error) => {
+      console.error('Erro ao carregar dados complementares do ANDON:', error);
+    });
   })().catch((error) => {
     console.error('Erro ao carregar dados do ANDON:', error);
     atualizarCardsPerformanceVazios();
@@ -2949,6 +3960,30 @@ function hideSupervisorView() {
   contentElement.classList.remove('hidden');
 }
 
+function abrirMenuAndon() {
+  if (!andonMenuDrawer || !andonMenuOverlay) return;
+  andonMenuDrawer.classList.remove('hidden');
+  andonMenuOverlay.classList.remove('hidden');
+  andonMenuDrawer.setAttribute('aria-hidden', 'false');
+}
+
+function fecharMenuAndon() {
+  if (!andonMenuDrawer || !andonMenuOverlay) return;
+  andonMenuDrawer.classList.add('hidden');
+  andonMenuOverlay.classList.add('hidden');
+  andonMenuDrawer.setAttribute('aria-hidden', 'true');
+}
+
+function abrirDashboardAndon() {
+  hideSupervisorView();
+  fecharMenuAndon();
+}
+
+function abrirSupervisoresAndon() {
+  showSupervisorView();
+  fecharMenuAndon();
+}
+
 function filterSupervisorCards() {
   const selectedUo = uoFilter.value;
   const selectedSupervisorCheckboxes = Array.from(document.querySelectorAll('.supervisor-checkbox:checked'));
@@ -2972,6 +4007,39 @@ function filterSupervisorCards() {
   atualizarSupervisorPerformanceCards();
 }
 
+if (andonMenuButton) {
+  andonMenuButton.addEventListener('click', abrirMenuAndon);
+}
+
+if (andonMenuClose) {
+  andonMenuClose.addEventListener('click', fecharMenuAndon);
+}
+
+if (andonMenuOverlay) {
+  andonMenuOverlay.addEventListener('click', fecharMenuAndon);
+}
+
+document.querySelectorAll('.andon-menu-item').forEach(item => {
+  item.addEventListener('click', () => {
+    const href = item.dataset.href;
+    const action = item.dataset.menuAction;
+
+    if (href) {
+      window.location.href = href;
+      return;
+    }
+
+    if (action === 'dashboard') {
+      abrirDashboardAndon();
+      return;
+    }
+
+    if (action === 'supervisores') {
+      abrirSupervisoresAndon();
+    }
+  });
+});
+
 supervisorButton.addEventListener('click', event => {
   event.preventDefault();
   showSupervisorView();
@@ -2992,6 +4060,10 @@ if (cardPerfTotalEquipes) {
   vincularModalCard(cardPerfTotalEquipes, () => abrirModalEquipesAndon('todas'));
 }
 
+if (cardPerfTotalEquipesLote) {
+  vincularModalCard(cardPerfTotalEquipesLote, () => abrirModalEquipesDLoteProd({ somenteD: false }));
+}
+
 if (cardPerfEquipesDWm) {
   vincularModalCard(cardPerfEquipesDWm, () => abrirModalEquipesAndon('d'));
 }
@@ -3002,28 +4074,16 @@ if (cardPerfEquipesDLote) {
 
 vincularModalCard(cardPerfClassificacaoWm, () => abrirModalEquipesAndon('todas'));
 vincularModalCard(cardPerfClassificacaoLote, abrirModalLoteProdDetalhes);
-vincularModalCard(cardPerfImpedimento, () => abrirModalControleServico('improdutivos', 'Impedimento'));
+vincularModalCard(cardPerfImpedimento, () => abrirModalControleServicoModelo('improdutivos', 'Impedimento'));
 vincularModalCard(cardSdcaTotalEquipes, abrirModalSdcaTotalEquipes);
 vincularModalCard(cardSdcaEquipesD, () => abrirModalEquipesAndon('d'));
 
 if (cardSdcaEquipesAcordadas) {
-  vincularModalCard(cardSdcaEquipesAcordadas, () => {
-    abrirModalEquipesAndonContexto({
-      filtro: 'acordadas',
-      title: 'Equipes Acordadas',
-      meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${sdcaEquipesAcordadas?.textContent || '0'}`
-    });
-  });
+  vincularModalCard(cardSdcaEquipesAcordadas, abrirModalEquipesAcordadasDetalhado);
 }
 
 if (cardSdcaEquipesJustificadas) {
-  vincularModalCard(cardSdcaEquipesJustificadas, () => {
-    abrirModalEquipesAndonContexto({
-      filtro: 'justificadas',
-      title: 'Equipes Justificadas',
-      meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${sdcaEquipesJustificadas?.textContent || '0'}`
-    });
-  });
+  vincularModalCard(cardSdcaEquipesJustificadas, abrirModalEquipesJustificadasDetalhado);
 }
 
 vincularModalCard(cardSdcaPercAcordadas, () => {
@@ -3082,12 +4142,12 @@ if (cardJornadaTrabalhoAbsenteismo) {
 
 vincularModalCard(cardJornadaTrabalhoHoraExtra, abrirModalHoraExtra);
 vincularModalCard(cardEficienciaTotal, abrirModalResumoControleServicoPorEquipe);
-vincularModalCard(cardEficienciaServDesignados, () => abrirModalControleServico('todos', 'Serviços Designados'));
-vincularModalCard(cardEficienciaServExecutados, () => abrirModalControleServico('executados', 'Serviços Executados'));
-vincularModalCard(cardEficienciaServProdutivo, () => abrirModalControleServico('produtivos', 'Serviços Produtivos'));
-vincularModalCard(cardEficienciaServImprodutivos, () => abrirModalControleServico('improdutivos', 'Serviços Improdutivos'));
-vincularModalCard(cardEficienciaPercImprod, () => abrirModalControleServico('improdutivos', '% Serviço Improdutivo'));
-vincularModalCard(cardEficienciaMediaServico, () => abrirModalControleServico('todos', 'Média de Serviço por Equipe'));
+vincularModalCard(cardEficienciaServDesignados, () => abrirModalControleServicoModelo('todos', 'Serviços Designados'));
+vincularModalCard(cardEficienciaServExecutados, () => abrirModalControleServicoModelo('executados', 'Serviços Executados'));
+vincularModalCard(cardEficienciaServProdutivo, () => abrirModalControleServicoModelo('produtivos', 'Serviços Produtivos'));
+vincularModalCard(cardEficienciaServImprodutivos, () => abrirModalControleServicoModelo('improdutivos', 'Serviços Improdutivos'));
+vincularModalCard(cardEficienciaPercImprod, () => abrirModalControleServicoModelo('improdutivos', '% Serviço Improdutivo'));
+vincularModalCard(cardEficienciaMediaServico, () => abrirModalControleServicoModelo('todos', 'Média de Serviço por Equipe'));
 vincularModalCard(cardEficienciaSemServico, abrirModalEquipesSemServico);
 
 if (equipesModalClose) {

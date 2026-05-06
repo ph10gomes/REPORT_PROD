@@ -9,6 +9,10 @@
 <body>
   <div class="app-shell">
     <header class="topbar">
+      <button type="button" id="andonMenuButton" class="andon-menu-button" aria-label="Abrir menu">
+        <span class="andon-menu-icon" aria-hidden="true"></span>
+        <span>Menu</span>
+      </button>
       <div class="brand">
         <span class="brand-title">VISÃO PCP</span>
         <span class="brand-subtitle">Monitoramento de Produção em Tempo Real</span>
@@ -48,6 +52,7 @@
         <div class="kpi-panel-header">PERFORMANCE</div>
         <div class="kpi-cards">
           <div class="grid-card andon-card-clickable" id="cardPerfTotalEquipes"><span class="card-label">TOTAL DE EQUIPES</span><div class="value" id="perfTotalEquipes">0</div></div>
+          <div class="grid-card andon-card-clickable" id="cardPerfTotalEquipesLote"><span class="card-label">TOTAL EQUIPES LOTE PROD.</span><div class="value" id="perfTotalEquipesLote">0</div></div>
           <div class="grid-card highlight"><span class="card-label">CLASSIFICAÇÃO WM</span><div class="value" id="perfClassificacaoWm">--</div></div>
           <div class="grid-card"><span class="card-label">CLASSIFICAÇÃO LOTE PROD.</span><div class="value" id="perfClassificacaoLote">--</div></div>
           <div class="grid-card andon-card-clickable" id="cardPerfEquipesDWm"><span class="card-label">EQUIPES D WM</span><div class="value" id="perfEquipesDWm">0</div></div>
@@ -907,6 +912,47 @@
       </nav>
     </footer>
   </div>
+
+  <div id="andonMenuOverlay" class="andon-menu-overlay hidden"></div>
+  <aside id="andonMenuDrawer" class="andon-menu-drawer hidden" aria-hidden="true">
+    <div class="andon-menu-header">
+      <div>
+        <strong>Menu</strong>
+        <span>Report Produção</span>
+      </div>
+      <button type="button" id="andonMenuClose" class="andon-menu-close" aria-label="Fechar menu">×</button>
+    </div>
+    <nav class="andon-menu-nav" aria-label="Menu principal">
+      <button type="button" class="andon-menu-item" data-href="index.html">
+        <span class="andon-menu-letter">T</span>
+        <span>
+          <strong>Tabela Diária</strong>
+          <small>Produção e jornadas</small>
+        </span>
+      </button>
+      <button type="button" class="andon-menu-item active" data-menu-action="dashboard">
+        <span class="andon-menu-letter">P</span>
+        <span>
+          <strong>Visão PCP</strong>
+          <small>Dashboard atual</small>
+        </span>
+      </button>
+      <button type="button" class="andon-menu-item" data-menu-action="supervisores">
+        <span class="andon-menu-letter">S</span>
+        <span>
+          <strong>Supervisores</strong>
+          <small>Visão por supervisor</small>
+        </span>
+      </button>
+      <button type="button" class="andon-menu-item" data-href="frontend/jornada.html">
+        <span class="andon-menu-letter">J</span>
+        <span>
+          <strong>Report Jornada</strong>
+          <small>Sistema de jornada</small>
+        </span>
+      </button>
+    </nav>
+  </aside>
 
   <div id="equipesModal" class="andon-modal hidden">
     <div class="andon-modal-dialog">

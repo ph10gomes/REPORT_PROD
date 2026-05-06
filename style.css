@@ -960,6 +960,14 @@ tr.resultado td{
     color:#0f172a;
 }
 
+.linha-periodo-click{
+    cursor:pointer;
+}
+
+.linha-periodo-click:hover td:not(.faixa-AA):not(.faixa-A):not(.faixa-B):not(.faixa-C):not(.faixa-D):not(.improd-alta):not(.status-incompleta):not(.status-completa):not(.status-sem-atendimento){
+    background:#e8f0ff;
+}
+
 .link{
     text-decoration:none;
     font-weight:normal;

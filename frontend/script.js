@@ -24,8 +24,10 @@ let filtroKpiAtivo = null;
 let justificativaAtual = null;
 let paginaAtual = 1;
 let filtrosColuna = {};
+let ordenacaoTabela = { key: "", direcao: "asc" };
 
 const COLUNAS_TABELA = [
+  { key: "COD_EQUIPE", label: "Cód. Equipe", filtravel: true },
   { key: "NOME_EQUIPE", label: "Equipes", filtravel: true },
   { key: "INICIO_JORNADA", label: "Início Jornada" },
   { key: "STATUS_INICIO", label: "Status Início", filtravel: true },
@@ -42,6 +44,21 @@ const COLUNAS_TABELA = [
   { key: "JORNADA", label: "Jornada" },
   { key: "STATUS_JORNADA", label: "Status", filtravel: true }
 ];
+
+const COLUNAS_ORDENAVEIS_TEMPO = new Set([
+  "INICIO_JORNADA",
+  "PRIMEIRO_ATENDIMENTO",
+  "INICIO_REFEICAO",
+  "TERMINO_REFEICAO",
+  "ULTIMO_ATENDIMENTO",
+  "JORNADA_PROD",
+  "FIM_JORNADA",
+  "JORNADA"
+]);
+
+COLUNAS_TABELA.forEach((coluna) => {
+  coluna.ordenavel = COLUNAS_ORDENAVEIS_TEMPO.has(coluna.key);
+});
 
 /* =========================
    METAS (por CLUSTER/PROCESSO)
@@ -95,6 +112,7 @@ const HORARIOS_ENTRADA = {
 const TOLERANCIA_ENTRADA_MIN = 15;
 const LIMITE_REFEICAO_MIN = 60;
 const REFEICAO_OBRIGATORIA_APOS_MIN = 240;
+const JORNADA_TRABALHO_MIN = 600;
 const TOLERANCIA_JORNADA_MIN = 15;
 const SEM_ENCERRAMENTO_APOS_MIN = 120;
 const MINUTOS_MINIMOS_PARA_VIRADA_DIA = 720;
@@ -195,6 +213,8 @@ function normalizarRegistro(r) {
   const SUP = pegarCampo(r, "SUPERVISOR_EQUIPE", "NOME_SUPERVISOR", "SUPERVISOR");
   const LID = pegarCampo(r, "LIDER_CONTROLADOR", "NOME_LIDER", "LIDER");
   const CTRL = pegarCampo(r, "NOME_CONTROLADOR", "CONTROLADOR");
+  const COD_EQUIPE = pegarCampo(r, "COD_EQUIPE", "Cód. Equipe", "CÃ³d. Equipe", "COD_EQUIPE_WM", "NUM_EQUIPE");
+  const NOME_EQUIPE = String(r.NOME_EQUIPE || "").trim();
 
   const inicio = hora(r.INICIO_JORNADA);
   const primeiro = hora(r.PRIMEIRO_ATENDIMENTO);
@@ -209,10 +229,11 @@ function normalizarRegistro(r) {
   const base = {
     ...r,
     COD_UO: r.COD_UO ?? "",
+    COD_EQUIPE: String(COD_EQUIPE || "").trim(),
     SUPERVISOR_EQUIPE: String(SUP || "").trim(),
     LIDER_CONTROLADOR: String(LID || "").trim(),
     NOME_CONTROLADOR: String(CTRL || "").trim(),
-    NOME_EQUIPE: String(r.NOME_EQUIPE || "").trim(),
+    NOME_EQUIPE,
     COD_CLASSIFICACAO_DINAMICO: String(r.COD_CLASSIFICACAO_DINAMICO || "").trim(),
     HORA: r.HORA ?? "",
     HORA_TURNO: horaTurno,
@@ -383,13 +404,13 @@ function calcularStatusPorMeta(reg) {
     }
 
     if (!fim) {
-      const minNec = meta?.JORNADA_MIN ?? 420;
+      const minNec = JORNADA_TRABALHO_MIN;
       const passouMuitoDoPrevisto = MIN_JORNADA !== null && MIN_JORNADA > (minNec + SEM_ENCERRAMENTO_APOS_MIN);
       STATUS_JORNADA = (!registroEhHoje(reg) || passouMuitoDoPrevisto)
         ? "SEM ENCERRAMENTO"
         : "EM ANDAMENTO";
     } else {
-      const minNec = meta?.JORNADA_MIN ?? 420;
+      const minNec = JORNADA_TRABALHO_MIN;
       STATUS_JORNADA = (MIN_JORNADA !== null && MIN_JORNADA >= (minNec - TOLERANCIA_JORNADA_MIN))
         ? "NORMAL"
         : "INCOMPLETA";
@@ -450,6 +471,9 @@ function registrarEventosUmaVez() {
       const el = document.getElementById(id);
       if (!el) return;
       el.addEventListener("change", periodoHandler);
+      if (id === "filtroSemanaAnalisada") {
+        el.addEventListener("input", atualizarNumeroSemanaSelecionada);
+      }
     });
 
   bindKpi("kpiTotalEqpDia", "TOTAL");
@@ -542,6 +566,10 @@ function exportarTabelaComoImagem() {
     const th = btn.closest("th");
     if (th) th.innerHTML = btn.querySelector("span")?.innerHTML || th.textContent;
   });
+  tabelaClone.querySelectorAll(".btn-ordenar-cabecalho").forEach((btn) => {
+    const th = btn.closest("th");
+    if (th) th.innerHTML = btn.querySelector("span")?.innerHTML || th.textContent;
+  });
   area.appendChild(tabelaClone);
   document.body.appendChild(area);
 
@@ -622,8 +650,9 @@ function inicializarFiltrosPeriodo() {
   setValorSeVazio("filtroMesAnalisado", dataHoje.slice(0, 7));
   setValorSeVazio("filtroDataInicio", dataHoje);
   setValorSeVazio("filtroDataFim", dataHoje);
-  setValorSeVazio("filtroSemanaAnalisada", obterSemanaIso(dataHoje));
+  setValorSeVazio("filtroSemanaAnalisada", dataHoje);
   atualizarVisibilidadeFiltrosPeriodo();
+  atualizarNumeroSemanaSelecionada();
 }
 
 function setValorSeVazio(id, valorPadrao) {
@@ -636,6 +665,15 @@ function atualizarVisibilidadeFiltrosPeriodo() {
   document.querySelectorAll("[data-periodo-campo]").forEach((el) => {
     el.classList.toggle("hidden", el.dataset.periodoCampo !== tipo);
   });
+  atualizarNumeroSemanaSelecionada();
+}
+
+function atualizarNumeroSemanaSelecionada() {
+  const el = document.getElementById("numeroSemanaSelecionada");
+  if (!el) return;
+  const dataSemana = valor("filtroSemanaAnalisada") || hojeISO();
+  const numero = obterNumeroSemanaDomingoSabado(dataSemana);
+  el.textContent = numero ? `Semana ${numero}` : "Semana -";
 }
 
 function montarUrlJornadas() {
@@ -650,8 +688,8 @@ function obterPeriodoSelecionado() {
   const tipo = valor("filtroTipoPeriodo") || "dia";
 
   if (tipo === "semana") {
-    const semana = valor("filtroSemanaAnalisada") || obterSemanaIso(hojeISO());
-    return obterRangeSemanaIso(semana);
+    const dataSemana = valor("filtroSemanaAnalisada") || hojeISO();
+    return obterRangeSemanaDomingoSabado(dataSemana);
   }
 
   if (tipo === "mes") {
@@ -677,7 +715,7 @@ function obterTextoPeriodoExportacao() {
   const periodo = obterPeriodoSelecionado();
 
   if (tipo === "semana") {
-    return `Semana ${valor("filtroSemanaAnalisada") || obterSemanaIso(hojeISO())} | ${formatarDataBr(periodo.dataInicio)} a ${formatarDataBr(periodo.dataFim)}`;
+    return `Semana ${formatarDataBr(periodo.dataInicio)} a ${formatarDataBr(periodo.dataFim)}`;
   }
 
   if (tipo === "mes") {
@@ -741,11 +779,36 @@ function obterRangeSemanaIso(semanaIso) {
   const monday = new Date(simple);
   monday.setDate(simple.getDate() - (day === 0 ? 6 : day - 1));
   const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
+  sunday.setDate(monday.getDate() - 1);
+  const saturday = new Date(sunday);
+  saturday.setDate(sunday.getDate() + 6);
   return {
-    dataInicio: monday.toISOString().slice(0, 10),
-    dataFim: sunday.toISOString().slice(0, 10)
+    dataInicio: sunday.toISOString().slice(0, 10),
+    dataFim: saturday.toISOString().slice(0, 10)
   };
+}
+
+function obterRangeSemanaDomingoSabado(dataIso) {
+  const date = new Date(`${dataIso || hojeISO()}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return { dataInicio: hojeISO(), dataFim: hojeISO() };
+  const domingo = new Date(date);
+  domingo.setDate(date.getDate() - date.getDay());
+  const sabado = new Date(domingo);
+  sabado.setDate(domingo.getDate() + 6);
+  return {
+    dataInicio: domingo.toISOString().slice(0, 10),
+    dataFim: sabado.toISOString().slice(0, 10)
+  };
+}
+
+function obterNumeroSemanaDomingoSabado(dataIso) {
+  const range = obterRangeSemanaDomingoSabado(dataIso);
+  const inicioAno = new Date(`${range.dataInicio.slice(0, 4)}-01-01T00:00:00`);
+  const domingo = new Date(`${range.dataInicio}T00:00:00`);
+  if (Number.isNaN(inicioAno.getTime()) || Number.isNaN(domingo.getTime())) return "";
+  const primeiroDomingo = new Date(inicioAno);
+  primeiroDomingo.setDate(inicioAno.getDate() - inicioAno.getDay());
+  return String(Math.floor((domingo - primeiroDomingo) / 604800000) + 1).padStart(2, "0");
 }
 
 /* =========================
@@ -1004,7 +1067,7 @@ function calcularStatusMediaPeriodo(reg, medias) {
     if (!fim) {
       STATUS_JORNADA = "SEM ENCERRAMENTO";
     } else {
-      const minNec = meta?.JORNADA_MIN ?? 420;
+      const minNec = JORNADA_TRABALHO_MIN;
       STATUS_JORNADA = medias.minJornada !== null && medias.minJornada >= (minNec - TOLERANCIA_JORNADA_MIN)
         ? "NORMAL"
         : "INCOMPLETA";
@@ -1075,9 +1138,10 @@ function preencherTabela() {
   const listaAntesFiltrosColuna = lista;
   lista = aplicarFiltrosColuna(lista);
   atualizarOpcoesFiltrosCabecalho(listaAntesFiltrosColuna);
+  lista = ordenarListaTabela(lista);
 
   if (!lista.length) {
-    tbody.innerHTML = `<tr><td colspan="15">Nenhum registro</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="16">Nenhum registro</td></tr>`;
     return;
   }
 
@@ -1158,6 +1222,7 @@ function preencherTabela() {
   listaPagina.forEach(l => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
+      <td>${safe(l.COD_EQUIPE)}</td>
       <td>${deveConsolidarMediaPeriodo() ? `<button class="btn-equipe-periodo" type="button">${safe(l.NOME_EQUIPE)}</button>` : safe(l.NOME_EQUIPE)}</td>
 
       <td>${safe(l.INICIO_JORNADA)}</td>
@@ -1200,6 +1265,30 @@ function aplicarFiltrosColuna(lista) {
   return lista.filter((row) =>
     ativos.every(([key, valorFiltro]) => normalizarValorFiltro(row[key]) === String(valorFiltro))
   );
+}
+
+function ordenarListaTabela(lista) {
+  const key = ordenacaoTabela.key;
+  if (!key) return lista;
+
+  const direcao = ordenacaoTabela.direcao === "desc" ? -1 : 1;
+  return [...lista].sort((a, b) => {
+    const valorA = valorOrdenacaoTempo(a[key]);
+    const valorB = valorOrdenacaoTempo(b[key]);
+    const vazioA = !Number.isFinite(valorA);
+    const vazioB = !Number.isFinite(valorB);
+
+    if (vazioA && vazioB) return String(a.NOME_EQUIPE || "").localeCompare(String(b.NOME_EQUIPE || ""), "pt-BR");
+    if (vazioA) return 1;
+    if (vazioB) return -1;
+    if (valorA === valorB) return String(a.NOME_EQUIPE || "").localeCompare(String(b.NOME_EQUIPE || ""), "pt-BR");
+    return (valorA - valorB) * direcao;
+  });
+}
+
+function valorOrdenacaoTempo(value) {
+  const minutos = hhmmToMin(value);
+  return Number.isFinite(minutos) ? minutos : null;
 }
 
 function abrirModalHistoricoEquipePeriodo(equipeSelecionada, origemEl = null) {
@@ -1277,10 +1366,11 @@ function prepararCabecalhosComFiltro() {
   const cabecalhos = document.querySelectorAll("#tabelaRelatorio thead tr:first-child th");
   cabecalhos.forEach((th, index) => {
     const coluna = COLUNAS_TABELA[index];
-    if (!coluna?.filtravel) return;
-    th.classList.add("th-filtravel");
+    if (!coluna?.filtravel && !coluna?.ordenavel) return;
+    if (coluna.filtravel) th.classList.add("th-filtravel");
+    if (coluna.ordenavel) th.classList.add("th-ordenavel");
     th.dataset.coluna = coluna.key;
-    th.title = `Filtrar ${coluna.label}`;
+    th.title = coluna.filtravel ? `Filtrar ${coluna.label}` : `Ordenar ${coluna.label}`;
 
     const conteudo = th.innerHTML;
     th.innerHTML = `
@@ -1290,12 +1380,27 @@ function prepararCabecalhosComFiltro() {
       </button>
       <div class="dropdown-filtro-coluna" data-dropdown-coluna="${safeAttr(coluna.key)}"></div>
     `;
+    if (coluna.ordenavel && !coluna.filtravel) {
+      th.innerHTML = `
+        <button class="btn-ordenar-cabecalho" type="button" data-coluna="${safeAttr(coluna.key)}">
+          <span>${conteudo}</span>
+          <span class="icone-ordenar-cabecalho">↕</span>
+        </button>
+      `;
+    }
   });
 
   document.querySelectorAll(".btn-filtro-cabecalho").forEach((btn) => {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
       alternarDropdownFiltro(btn.dataset.coluna);
+    });
+  });
+
+  document.querySelectorAll(".btn-ordenar-cabecalho").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      alternarOrdenacaoTabela(btn.dataset.coluna);
     });
   });
 }
@@ -1340,6 +1445,20 @@ function alternarDropdownFiltro(key) {
   if (deveAbrir) dropdown.classList.add("aberto");
 }
 
+function alternarOrdenacaoTabela(key) {
+  if (!key || !COLUNAS_ORDENAVEIS_TEMPO.has(key)) return;
+  const mesmaColuna = ordenacaoTabela.key === key;
+  ordenacaoTabela = {
+    key,
+    direcao: mesmaColuna && ordenacaoTabela.direcao === "asc" ? "desc" : "asc"
+  };
+  paginaAtual = 1;
+  fecharDropdownFiltros();
+  preencherTabela();
+  atualizarEstadoCabecalhosFiltrados();
+  informarAlturaParaPai();
+}
+
 function fecharDropdownFiltros() {
   document.querySelectorAll(".dropdown-filtro-coluna.aberto").forEach((el) => el.classList.remove("aberto"));
 }
@@ -1353,6 +1472,13 @@ function atualizarEstadoCabecalhosFiltrados() {
   COLUNAS_TABELA.filter(coluna => coluna.filtravel).forEach((coluna) => {
     const th = document.querySelector(`th[data-coluna="${CSS.escape(coluna.key)}"]`);
     th?.classList.toggle("filtro-ativo", Boolean(filtrosColuna[coluna.key]));
+  });
+  COLUNAS_TABELA.filter(coluna => coluna.ordenavel).forEach((coluna) => {
+    const th = document.querySelector(`th[data-coluna="${CSS.escape(coluna.key)}"]`);
+    const ativo = ordenacaoTabela.key === coluna.key;
+    th?.classList.toggle("ordenacao-ativa", ativo);
+    const icone = th?.querySelector(".icone-ordenar-cabecalho");
+    if (icone) icone.textContent = ativo ? (ordenacaoTabela.direcao === "asc" ? "↑" : "↓") : "↕";
   });
 }
 
@@ -1787,10 +1913,27 @@ function classe(v) {
 }
 
 function pegarCampo(obj, ...campos) {
+  if (!obj || typeof obj !== "object") return "";
+  const mapaNormalizado = new Map(
+    Object.keys(obj).map((key) => [normalizarChaveCampo(key), key])
+  );
+
   for (const c of campos) {
     if (obj[c] !== undefined && obj[c] !== null && String(obj[c]).trim() !== "") {
       return obj[c];
     }
+    const chaveReal = mapaNormalizado.get(normalizarChaveCampo(c));
+    if (chaveReal && obj[chaveReal] !== undefined && obj[chaveReal] !== null && String(obj[chaveReal]).trim() !== "") {
+      return obj[chaveReal];
+    }
   }
   return "";
+}
+
+function normalizarChaveCampo(valor) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/gi, "")
+    .toUpperCase();
 }

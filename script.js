@@ -1,9 +1,12 @@
 ﻿/* ================= VARIÁVEIS ================= */
 
 const uoSelect = document.getElementById("uoSelect");
+const periodoTabelaSelect = document.getElementById("periodoTabelaSelect");
 const dataSelect = document.getElementById("dataSelect");
 const semanaSelect = document.getElementById("semanaSelect");
 const mesSelect = document.getElementById("mesSelect");
+const periodoInicioSelect = document.getElementById("periodoInicioSelect");
+const periodoFimSelect = document.getElementById("periodoFimSelect");
 const tipoSelect = document.getElementById("tipoSelect");
 const turnoSelect = document.getElementById("turnoSelect");
 const horaSelect = document.getElementById("horaSelect");
@@ -31,6 +34,8 @@ const grupoData = document.getElementById("grupoData");
 const grupoHora = document.getElementById("grupoHora");
 const grupoSemana = document.getElementById("grupoSemana");
 const grupoMes = document.getElementById("grupoMes");
+const grupoPeriodoInicio = document.getElementById("grupoPeriodoInicio");
+const grupoPeriodoFim = document.getElementById("grupoPeriodoFim");
 
 const btnMenuModo = document.getElementById("btnMenuModo");
 const drawerModo = document.getElementById("drawerModo");
@@ -1484,6 +1489,21 @@ function obterListaHorasPorModo(modo = modoTabela) {
     return modo === "total-horas" ? HORAS_TOTAIS : FAIXAS;
 }
 
+function obterModoPorPeriodoTopo(valor) {
+    const periodo = String(valor || "").trim();
+    if (periodo === "semanal") return "semanal";
+    if (periodo === "mensal") return "mensal";
+    if (periodo === "periodo") return "periodo";
+    return "diario";
+}
+
+function obterPeriodoTopoPorModo(modo) {
+    if (modo === "semanal") return "semanal";
+    if (modo === "mensal") return "mensal";
+    if (modo === "periodo") return "periodo";
+    return "diario";
+}
+
 function obterHorasVisiveisTabela(horaReferencia, modo = modoTabela) {
     const horasBase = obterListaHorasPorModo(modo);
     const raw = String(horaReferencia || "").trim().toUpperCase();
@@ -1555,6 +1575,16 @@ function montarParametrosDadosPainel({ forcarTotalHoras = false } = {}) {
                 qs.set("dataEnd", fim);
                 return qs;
             }
+        }
+    }
+
+    if (modoTabela === "periodo") {
+        const inicio = String(periodoInicioSelect?.value || "").trim();
+        const fim = String(periodoFimSelect?.value || inicio).trim();
+        if (inicio && fim) {
+            qs.set("dataStart", inicio <= fim ? inicio : fim);
+            qs.set("dataEnd", inicio <= fim ? fim : inicio);
+            return qs;
         }
     }
 
@@ -1953,6 +1983,7 @@ function setModo(modo, reaplicar = true) {
         geral: "Tabela Geral",
         semanal: "Tabela Semanal",
         mensal: "Tabela Mensal",
+        periodo: "Tabela por Período",
         quinzena1: "1ª Quinzena",
         quinzena2: "2ª Quinzena",
         "report-nec": "Painel Report NEC",
@@ -1963,6 +1994,10 @@ function setModo(modo, reaplicar = true) {
 
     if (modoAtualTxt) {
         modoAtualTxt.innerText = titulos[modo] || "Tabela Diária";
+    }
+
+    if (periodoTabelaSelect) {
+        periodoTabelaSelect.value = obterPeriodoTopoPorModo(modo);
     }
 
     atualizarMenuAtivo(modo);
@@ -1991,6 +2026,8 @@ function setModo(modo, reaplicar = true) {
         "hidden",
         modoPainelExternoAtivo || !(modo === "mensal" || modo === "quinzena1" || modo === "quinzena2")
     );
+    if (grupoPeriodoInicio) grupoPeriodoInicio.classList.toggle("hidden", modoPainelExternoAtivo || modo !== "periodo");
+    if (grupoPeriodoFim) grupoPeriodoFim.classList.toggle("hidden", modoPainelExternoAtivo || modo !== "periodo");
 
     if (modoPainelExternoAtivo) return;
 
@@ -2014,6 +2051,12 @@ function setModo(modo, reaplicar = true) {
 
     if ((modo === "mensal" || modo === "quinzena1" || modo === "quinzena2") && mesSelect && !mesSelect.value) {
         mesSelect.value = obterAnoMesAtual();
+    }
+
+    if (modo === "periodo") {
+        const hoje = obterHojeISO();
+        if (periodoInicioSelect && !periodoInicioSelect.value) periodoInicioSelect.value = dataSelect?.value || hoje;
+        if (periodoFimSelect && !periodoFimSelect.value) periodoFimSelect.value = periodoInicioSelect?.value || hoje;
     }
 
     atualizarOpcoesHora();
@@ -2135,6 +2178,20 @@ function popularSemanasDisponiveis() {
             .map(l => obterSemanaISODeData(normalizarDataExcel(l["Data"])))
             .filter(Boolean)
     )].sort().reverse();
+
+    if (String(semanaSelect.tagName || "").toUpperCase() === "INPUT") {
+        const semanaAtual = obterSemanaISODeData(dataSelect?.value || obterHojeISO());
+        if (valorAtual) {
+            semanaSelect.value = valorAtual;
+        } else if (semanas.includes(semanaAtual)) {
+            semanaSelect.value = semanaAtual;
+        } else if (semanas.length) {
+            semanaSelect.value = semanas[0];
+        } else {
+            semanaSelect.value = semanaAtual;
+        }
+        return;
+    }
 
     semanaSelect.innerHTML =
         `<option value="">Selecione a semana</option>` +
@@ -5321,6 +5378,11 @@ async function aplicar() {
         return;
     }
 
+    if (modoTabela === "periodo") {
+        aplicarPeriodoPersonalizado();
+        return;
+    }
+
     if (modoTabela === "quinzena1") {
         aplicarQuinzenaEspecifica(1);
         return;
@@ -5931,7 +5993,7 @@ function aplicarSemanal() {
         const totalEqLinha = l.eq.AA + l.eq.A + l.eq.B + l.eq.C + l.eq.D;
 
         tbody.innerHTML += `
-        <tr>
+        <tr class="linha-periodo-click" onclick="abrirModalPeriodoMedia('${escapeJsString(l.nome)}')">
             <td>${escapeHtml(rotuloGrupoExibicao(l.nome))}</td>
             <td>${fmt3(l.meta)}</td>
             <td>${fmt3(l.prod)}</td>
@@ -5954,7 +6016,7 @@ function aplicarSemanal() {
         resumo.eqTot.AA + resumo.eqTot.A + resumo.eqTot.B + resumo.eqTot.C + resumo.eqTot.D;
 
     tbody.innerHTML += `
-    <tr class="resultado">
+    <tr class="resultado linha-periodo-click" onclick="abrirModalPeriodoMedia('')">
         <td>TOTAL SEMANA</td>
         <td>${fmt3(resumo.totalMeta)}</td>
         <td>${fmt3(resumo.totalProd)}</td>
@@ -6019,7 +6081,7 @@ function aplicarMensal() {
         const totalEqLinha = l.eq.AA + l.eq.A + l.eq.B + l.eq.C + l.eq.D;
 
         tbody.innerHTML += `
-        <tr>
+        <tr class="linha-periodo-click" onclick="abrirModalPeriodoMedia('${escapeJsString(l.nome)}')">
             <td>${escapeHtml(rotuloGrupoExibicao(l.nome))}</td>
             <td>${fmt3(l.meta)}</td>
             <td>${fmt3(l.prod)}</td>
@@ -6042,8 +6104,124 @@ function aplicarMensal() {
         resumo.eqTot.AA + resumo.eqTot.A + resumo.eqTot.B + resumo.eqTot.C + resumo.eqTot.D;
 
     tbody.innerHTML += `
-    <tr class="resultado">
+    <tr class="resultado linha-periodo-click" onclick="abrirModalPeriodoMedia('')">
         <td>TOTAL GERAL</td>
+        <td>${fmt3(resumo.totalMeta)}</td>
+        <td>${fmt3(resumo.totalProd)}</td>
+
+        ${FAIXAS.map(f => {
+            let m = 0, p = 0;
+            Object.values(resumo.cacheFaixas[f] || {}).forEach(x => {
+                m += x.meta;
+                p += x.prod;
+            });
+            if (!m && !p) return `<td>-</td>`;
+            const fx = classificar(m ? (p / m) * 100 : 0);
+            return `<td class="faixa-${fx}">${fx}</td>`;
+        }).join("")}
+
+        <td>${fmt2(totalEqGeral)}</td>
+        <td>${fmt2(resumo.eqTot.AA)}</td>
+        <td>${fmt2(resumo.eqTot.A)}</td>
+        <td>${fmt2(resumo.eqTot.B)}</td>
+        <td>${fmt2(resumo.eqTot.C)}</td>
+        <td>${fmt2(resumo.eqTot.D)}</td>
+    </tr>`;
+
+    atualizarKpis(resumo.totalMeta, resumo.totalProd, resumo.eqTot, 2);
+
+    filtrosAtivos = {};
+    adicionarFiltrosExcel();
+}
+
+/* ================= MODO PERÍODO ================= */
+
+function obterDatasDoPeriodoPersonalizado(uo, inicio, fim) {
+    const dataInicio = String(inicio || "").trim();
+    const dataFim = String(fim || dataInicio).trim();
+    if (!dataInicio || !dataFim) return [];
+
+    const menor = dataInicio <= dataFim ? dataInicio : dataFim;
+    const maior = dataInicio <= dataFim ? dataFim : dataInicio;
+
+    return [...new Set(
+        dados
+            .filter(l => {
+                const data = normalizarDataExcel(l["Data"]);
+                if (!data) return false;
+                if (uo && String(l["Cód.UO"]) !== String(uo)) return false;
+                return data >= menor && data <= maior;
+            })
+            .map(l => normalizarDataExcel(l["Data"]))
+            .filter(Boolean)
+    )].sort();
+}
+
+function aplicarPeriodoPersonalizado() {
+    const uo = uoSelect.value;
+    const inicio = periodoInicioSelect?.value || "";
+    const fim = periodoFimSelect?.value || inicio;
+    const tipo = tipoSelect.value;
+    const campo = obterCampoPorTipo(tipo);
+
+    montarCabecalho(tipo, false);
+
+    if (!inicio || !fim) {
+        limparTelaSemDados(tipo, "Selecione a data inicial e final");
+        return;
+    }
+
+    const dataInicio = inicio <= fim ? inicio : fim;
+    const dataFim = inicio <= fim ? fim : inicio;
+    const datasPeriodo = obterDatasDoPeriodoPersonalizado(uo, dataInicio, dataFim);
+
+    if (!datasPeriodo.length) {
+        limparTelaSemDados(tipo, "Nenhum dado para o período selecionado");
+        return;
+    }
+
+    const resumo = resumirPeriodo(datasPeriodo, campo, uo);
+
+    if (!resumo.diasComDados) {
+        limparTelaSemDados(tipo, "Nenhum dado válido para o período selecionado");
+        return;
+    }
+
+    if (modoAtualTxt) {
+        modoAtualTxt.innerText = `Tabela por Período (${dataInicio} a ${dataFim})`;
+    }
+
+    tbody.innerHTML = "";
+
+    resumo.linhas.forEach(l => {
+        const totalEqLinha = l.eq.AA + l.eq.A + l.eq.B + l.eq.C + l.eq.D;
+
+        tbody.innerHTML += `
+        <tr class="linha-periodo-click" onclick="abrirModalPeriodoMedia('${escapeJsString(l.nome)}')">
+            <td>${escapeHtml(rotuloGrupoExibicao(l.nome))}</td>
+            <td>${fmt3(l.meta)}</td>
+            <td>${fmt3(l.prod)}</td>
+
+            ${FAIXAS.map(f => {
+                const fx = l.faixas[f] || "-";
+                return `<td class="faixa-${fx}">${fx}</td>`;
+            }).join("")}
+
+            <td>${fmt2(totalEqLinha)}</td>
+            <td>${fmt2(l.eq.AA)}</td>
+            <td>${fmt2(l.eq.A)}</td>
+            <td>${fmt2(l.eq.B)}</td>
+            <td>${fmt2(l.eq.C)}</td>
+            <td>${fmt2(l.eq.D)}</td>
+        </tr>`;
+    });
+
+    const totalEqGeral =
+        resumo.eqTot.AA + resumo.eqTot.A + resumo.eqTot.B + resumo.eqTot.C + resumo.eqTot.D;
+
+    tbody.innerHTML += `
+    <tr class="resultado linha-periodo-click" onclick="abrirModalPeriodoMedia('')">
+        <td>TOTAL PERÍODO</td>
         <td>${fmt3(resumo.totalMeta)}</td>
         <td>${fmt3(resumo.totalProd)}</td>
 
@@ -6173,6 +6351,214 @@ function aplicarQuinzenaEspecifica(numeroQuinzena) {
 }
 
 /* ================= MODAL EQUIPES ================= */
+
+function obterDatasPeriodoModoAtual() {
+    const uo = uoSelect.value;
+
+    if (modoTabela === "semanal") {
+        return obterDatasDaSemanaSelecionada(uo, semanaSelect.value);
+    }
+
+    if (modoTabela === "mensal") {
+        return obterDatasDoMes(uo, mesSelect.value);
+    }
+
+    if (modoTabela === "periodo") {
+        return obterDatasDoPeriodoPersonalizado(uo, periodoInicioSelect?.value || "", periodoFimSelect?.value || "");
+    }
+
+    return [];
+}
+
+function modaValores(valores) {
+    const mapa = {};
+    valores.forEach(valor => {
+        const v = String(valor || "-").toUpperCase();
+        if (!v || v === "-") return;
+        mapa[v] = (mapa[v] || 0) + 1;
+    });
+    const ordenado = Object.entries(mapa).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "pt-BR"));
+    return ordenado[0]?.[0] || "-";
+}
+
+function adicionarMinutoMedia(lista, valor) {
+    const minutos = horaTextoParaMinutos(valor);
+    if (Number.isFinite(minutos)) lista.push(minutos);
+}
+
+function mediaMinutosParaHora(lista) {
+    if (!Array.isArray(lista) || !lista.length) return "-";
+    const media = Math.round(lista.reduce((acc, valor) => acc + valor, 0) / lista.length);
+    return minutosParaHoraTexto(media);
+}
+
+function montarListaEquipesMediaPeriodo(nomeLinha = "") {
+    const datasPeriodo = obterDatasPeriodoModoAtual();
+    const uo = uoSelect.value;
+    const mapa = {};
+
+    datasPeriodo.forEach(data => {
+        const faixaAtual = ultimaFaixaDisponivel(uo, data);
+        if (!faixaAtual) return;
+
+        const listaDia = montarListaEquipesPorFiltro(nomeLinha || null, null, faixaAtual, data, uo);
+
+        listaDia.forEach(item => {
+            const codigo = String(item.codigo || "").trim();
+            if (!codigo) return;
+
+            if (!mapa[codigo]) {
+                mapa[codigo] = {
+                    ...montarLinhaResumoEquipePadrao(),
+                    codigo,
+                    frota: item.frota || "-",
+                    equipe: item.equipe || "-",
+                    dias: 0,
+                    metaDiaSoma: 0,
+                    prodDiaSoma: 0,
+                    metaSoma: 0,
+                    prodSoma: 0,
+                    servicosSoma: 0,
+                    produtivoSoma: 0,
+                    improdutivoSoma: 0,
+                    percImprodValores: [],
+                    statusValores: [],
+                    inicioJornadaMin: [],
+                    primeiroAtendMin: [],
+                    ultimoAtendMin: [],
+                    jornadaProdMin: [],
+                    faixasValores: {}
+                };
+                FAIXAS.forEach(h => mapa[codigo].faixasValores[h] = []);
+            }
+
+            const atual = mapa[codigo];
+            atual.dias += 1;
+            atual.metaDiaSoma += Number(item.metaDia || 0);
+            atual.prodDiaSoma += Number(item.prodDia || 0);
+            atual.metaSoma += Number(item.meta || 0);
+            atual.prodSoma += Number(item.prod || 0);
+            atual.servicosSoma += toNumber(item.servicos);
+            atual.produtivoSoma += toNumber(item.produtivo);
+            atual.improdutivoSoma += toNumber(item.improdutivo);
+            if (typeof item.percImprod === "number") atual.percImprodValores.push(item.percImprod);
+            atual.statusValores.push(item.statusJornada);
+            adicionarMinutoMedia(atual.inicioJornadaMin, item.inicioJornada);
+            adicionarMinutoMedia(atual.primeiroAtendMin, item.primeiroAtend);
+            adicionarMinutoMedia(atual.ultimoAtendMin, item.ultimoAtend);
+            adicionarMinutoMedia(atual.jornadaProdMin, item.jornadaProd);
+            FAIXAS.forEach(h => atual.faixasValores[h].push(item.faixas?.[h] || "-"));
+        });
+    });
+
+    return Object.values(mapa)
+        .filter(item => item.dias > 0)
+        .map(item => {
+            const faixas = {};
+            FAIXAS.forEach(h => faixas[h] = modaValores(item.faixasValores[h] || []));
+            const metaDia = item.metaDiaSoma / item.dias;
+            const prodDia = item.prodDiaSoma / item.dias;
+            const meta = item.metaSoma / item.dias;
+            const prod = item.prodSoma / item.dias;
+            const servicos = item.servicosSoma / item.dias;
+            const produtivo = item.produtivoSoma / item.dias;
+            const improdutivo = item.improdutivoSoma / item.dias;
+            return {
+                ...item,
+                faixas,
+                metaDia,
+                prodDia,
+                meta,
+                prod,
+                servicos,
+                produtivo,
+                improdutivo,
+                inicioJornada: mediaMinutosParaHora(item.inicioJornadaMin),
+                primeiroAtend: mediaMinutosParaHora(item.primeiroAtendMin),
+                ultimoAtend: mediaMinutosParaHora(item.ultimoAtendMin),
+                jornadaProd: mediaMinutosParaHora(item.jornadaProdMin),
+                percImprod: servicos > 0 ? (improdutivo / servicos) * 100 : "-",
+                percProdDiaCompleto: metaDia > 0 ? (prodDia / metaDia) * 100 : 0,
+                faixaDiaCompleta: classificar(metaDia > 0 ? (prodDia / metaDia) * 100 : 0),
+                percProdDia: meta > 0 ? (prod / meta) * 100 : 0,
+                faixaDia: classificar(meta > 0 ? (prod / meta) * 100 : 0),
+                statusJornada: modaValores(item.statusValores)
+            };
+        })
+        .sort((a, b) => String(a.equipe).localeCompare(String(b.equipe), "pt-BR"));
+}
+
+function abrirModalPeriodoMedia(nomeLinha = "") {
+    if (!(modoTabela === "semanal" || modoTabela === "mensal" || modoTabela === "periodo")) return;
+
+    filtrosModal = {};
+    currentModalKpiFilter = "todas";
+    renderCabecalhoModalCompleto(true, false, FAIXAS, false, false);
+    garantirColunaInicioJornada(document.querySelector("#modalEquipes thead tr"));
+
+    const modal = document.getElementById("modalEquipes");
+    const body = document.getElementById("modalBody");
+    const titulo = document.getElementById("modalTitulo");
+    const lista = montarListaEquipesMediaPeriodo(nomeLinha);
+    const rotuloPeriodo = modoTabela === "semanal"
+        ? "Semana"
+        : (modoTabela === "mensal" ? "Mês" : "Período");
+    const cabTipo = rotuloTipoAtual();
+    const cabTexto = nomeLinha ? `${cabTipo}: ${rotuloGrupoExibicao(nomeLinha)} – ` : "";
+
+    titulo.innerText = `${cabTexto}Média das Equipes | ${rotuloPeriodo}`;
+
+    currentModalContext = {
+        tipoModal: "equipes-periodo",
+        supervisor: nomeLinha || "",
+        horaClicada: "",
+        faixaClicada: "",
+        data: "",
+        uo: uoSelect.value,
+        tipoVisao: tipoSelect.value,
+        listaAtual: lista,
+        kpisFixos: null,
+        qtdDAnalisadas: lista.filter(e => e.faixaDiaCompleta === "D").length
+    };
+
+    controlarVisibilidadeKpisModal(true);
+    fecharCaixaDetalheFaixa();
+    fecharCaixaDetalheFaixaDia();
+    atualizarKpisModalEquipes(lista);
+
+    body.innerHTML = lista.length ? lista.map(e => {
+        const status = String(e.statusJornada || "").toUpperCase();
+        const classeStatus = obterClasseStatusJornada(status);
+        return `
+        <tr data-codigo="${escapeHtml(e.codigo)}">
+            <td>${escapeHtml(e.codigo)}</td>
+            <td>${escapeHtml(String(e.frota || "-"))}</td>
+            <td class="col-equipe">${escapeHtml(e.equipe)}</td>
+            <td>${fmt3(e.metaDia)}</td>
+            <td>${fmt3(e.prod)}</td>
+            <td class="faixa-${e.faixaDiaCompleta}">${e.faixaDiaCompleta}</td>
+            <td>${e.percProdDiaCompleto.toFixed(2)}%</td>
+            ${FAIXAS.map(h => `<td class="faixa-${e.faixas[h] || "-"}">${e.faixas[h] || "-"}</td>`).join("")}
+            <td>${fmt2(e.servicos)}</td>
+            <td>${fmt2(e.produtivo)}</td>
+            <td>${fmt2(e.improdutivo)}</td>
+            <td class="${typeof e.percImprod === "number" && e.percImprod > 20 ? "improd-alta" : ""}">
+                ${typeof e.percImprod === "number" ? e.percImprod.toFixed(2) + "%" : "-"}
+            </td>
+            <td>${horaExcelParaTexto(e.inicioJornada)}</td>
+            <td>${horaExcelParaTexto(e.primeiroAtend)}</td>
+            <td>${horaExcelParaTexto(e.ultimoAtend)}</td>
+            <td>${horaExcelParaTexto(e.jornadaProd)}</td>
+            <td class="${classeStatus}">${status}</td>
+        </tr>`;
+    }).join("") : `<tr><td colspan="${16 + FAIXAS.length}">Nenhuma equipe encontrada para o filtro atual</td></tr>`;
+
+    controlarBotaoFullscreen(lista.length);
+    atualizarBotaoAcordos17();
+    atualizarBotaoAcordosRs();
+    modal.classList.remove("hidden");
+    setTimeout(() => adicionarFiltrosModal(), 50);
+}
 
 async function abrirModalEquipes(nomeLinha, faixaClicada, horaClicada) {
     if (modoPeriodoAtivo()) {
@@ -8061,6 +8447,12 @@ if (dataSelect) {
     };
 }
 
+if (periodoTabelaSelect) {
+    periodoTabelaSelect.onchange = () => {
+        setModo(obterModoPorPeriodoTopo(periodoTabelaSelect.value));
+    };
+}
+
 if (horaSelect) {
     horaSelect.onchange = () => {
         if (modoTabela === "diario" || modoTabela === "geral" || modoTabela === "total-horas") {
@@ -8080,6 +8472,22 @@ if (semanaSelect) {
 if (mesSelect) {
     mesSelect.onchange = () => {
         if (modoTabela === "mensal" || modoTabela === "quinzena1" || modoTabela === "quinzena2") {
+            carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
+        }
+    };
+}
+
+if (periodoInicioSelect) {
+    periodoInicioSelect.onchange = () => {
+        if (modoTabela === "periodo") {
+            carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
+        }
+    };
+}
+
+if (periodoFimSelect) {
+    periodoFimSelect.onchange = () => {
+        if (modoTabela === "periodo") {
             carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
         }
     };
@@ -8202,10 +8610,7 @@ function salvarRelatorioPDF() {
 
 function abrirPainelAndon() {
     const url = "index1.html";
-    const novaAba = window.open(url, "_blank", "noopener,noreferrer");
-    if (!novaAba) {
-        window.location.href = url;
-    }
+    window.location.assign(url);
 }
 
 function carregarIframeSobDemanda(iframe) {

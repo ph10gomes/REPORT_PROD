@@ -444,7 +444,7 @@ app.get("/api/controle-servico", async (req, res) => {
     const codEquipe = req.query.codEquipe;
 
     const dateCols = [];
-    const colDataAtualizacao = pickCol(["DATA_ATUALIZACAO", "DATA ATUALIZACAO", "DATA_ATUALIZAÇÃO"]);
+    const colDataAtualizacao = pickCol(["DATA_ATUALIZACAO", "DATA ATUALIZACAO", "DATA_ATUALIZAÇÃO", "DATA_ATUALIZACAO_D"]);
     if (!colDataAtualizacao) {
       return res.status(400).json({ ok: false, error: "Coluna DATA_ATUALIZACAO nao encontrada na tabela de controle de servicos." });
     }
@@ -492,7 +492,7 @@ app.get("/api/controle-servico", async (req, res) => {
 
     let sql = `SELECT * FROM \`${table}\``;
     if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
-    const orderCol = pickCol(["DATA_ATUALIZACAO", "DATA_ACIONAMENTO", "DATA_DESIGNACAO", "DATA_TERMINO_REAL", "DATA_LOCALIZACAO", "DATA", "ID", "id"]);
+    const orderCol = pickCol(["DATA_ATUALIZACAO", "DATA_ATUALIZACAO_D", "DATA_ACIONAMENTO", "DATA_DESIGNACAO", "DATA_TERMINO_REAL", "DATA_LOCALIZACAO", "DATA", "ID", "id"]);
     if (orderCol) sql += ` ORDER BY \`${orderCol}\` ASC`;
     sql += " LIMIT ?";
     params.push(limit);
@@ -1591,6 +1591,8 @@ app.get("/jornadas", async (req, res) => {
         ? `
         SELECT
           COD_UO,
+          COALESCE(NULLIF(TRIM(CAST(COD_EQUIPE AS CHAR)), ''), NULLIF(TRIM(CAST(NUM_EQUIPE AS CHAR)), '')) AS COD_EQUIPE,
+          NUM_EQUIPE,
           NOME_SUPERVISOR AS SUPERVISOR_EQUIPE,
           NOME_LIDER AS LIDER_CONTROLADOR,
           NOME_CONTROLADOR,
@@ -1622,6 +1624,7 @@ app.get("/jornadas", async (req, res) => {
         : `
         SELECT
           COD_UO,
+          TRIM(CAST(COD_EQUIPE AS CHAR)) AS COD_EQUIPE,
           SUPERVISOR_EQUIPE,
           LIDER_CONTROLADOR,
           NOME_CONTROLADOR,

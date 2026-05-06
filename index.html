@@ -76,6 +76,16 @@
                         <select id="uoSelect"></select>
                     </div>
 
+                    <div class="filtro-grupo">
+                        <label for="periodoTabelaSelect">Período</label>
+                        <select id="periodoTabelaSelect">
+                            <option value="diario">Diário</option>
+                            <option value="semanal">Semanal</option>
+                            <option value="mensal">Mensal</option>
+                            <option value="periodo">Período</option>
+                        </select>
+                    </div>
+
                     <div class="filtro-grupo" id="grupoData">
                         <label for="dataSelect">Data</label>
                         <input type="date" id="dataSelect">
@@ -96,12 +106,22 @@
 
                     <div class="filtro-grupo hidden" id="grupoSemana">
                         <label for="semanaSelect">Semana</label>
-                        <select id="semanaSelect"></select>
+                        <input type="week" id="semanaSelect">
                     </div>
 
                     <div class="filtro-grupo hidden" id="grupoMes">
                         <label for="mesSelect">Mês</label>
                         <input type="month" id="mesSelect">
+                    </div>
+
+                    <div class="filtro-grupo hidden" id="grupoPeriodoInicio">
+                        <label for="periodoInicioSelect">Data Inicial</label>
+                        <input type="date" id="periodoInicioSelect">
+                    </div>
+
+                    <div class="filtro-grupo hidden" id="grupoPeriodoFim">
+                        <label for="periodoFimSelect">Data Final</label>
+                        <input type="date" id="periodoFimSelect">
                     </div>
                 </div>
 
