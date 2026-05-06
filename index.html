@@ -1,0 +1,1144 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Produção</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    
+    <div id="drawerModo" class="drawer-modo hidden" aria-label="Menu principal">
+        <div class="drawer-modo-header">
+            <div class="drawer-brand">
+                <span class="drawer-badge">NCSR</span>
+                <div class="drawer-titulos">
+                    <h3>Painel NCSR</h3>
+                    <p>Navegação e relatórios operacionais</p>
+                </div>
+            </div>
+            <button id="btnFecharDrawer" class="btn-fechar-drawer" type="button">×</button>
+        </div>
+
+        <div class="drawer-modo-body">
+            <div class="drawer-section-label">Relatórios principais</div>
+            <button class="menu-modo-item" data-icon="D" data-modo="diario" type="button"><span class="menu-item-kicker">Hoje</span><strong>Tabela Diária</strong></button>
+            <button class="menu-modo-item" data-icon="T" data-modo="total-horas" type="button"><span class="menu-item-kicker">Dia completo</span><strong>Tabela Total (01–23)</strong></button>
+            <button class="menu-modo-item" data-icon="S" data-modo="semanal" type="button"><span class="menu-item-kicker">Período</span><strong>Tabela Semanal</strong></button>
+            <button class="menu-modo-item" data-icon="M" data-modo="mensal" type="button"><span class="menu-item-kicker">Consolidado</span><strong>Tabela Mensal</strong></button>
+            <button class="menu-modo-item" data-icon="Q1" data-modo="quinzena1" type="button"><span class="menu-item-kicker">Recorte</span><strong>1ª Quinzena</strong></button>
+            <button class="menu-modo-item" data-icon="Q2" data-modo="quinzena2" type="button"><span class="menu-item-kicker">Recorte</span><strong>2ª Quinzena</strong></button>
+            <div class="drawer-section-label">Painéis especiais</div>
+            <button class="menu-modo-item" data-icon="NEC" data-modo="report-nec" type="button"><span class="menu-item-kicker">Painel externo</span><strong>Painel Report NEC</strong></button>
+            <button class="menu-modo-item" data-icon="J" data-modo="report-jornada" type="button"><span class="menu-item-kicker">Painel externo</span><strong>Report Jornada</strong></button>
+            <button class="menu-modo-item" data-icon="AND" data-action="abrir-andon" type="button"><span class="menu-item-kicker">Painel externo</span><strong>ANDON</strong></button>
+            <button class="menu-modo-item" data-icon="G" data-modo="geral" type="button"><span class="menu-item-kicker">Resumo</span><strong>Tabela Geral</strong></button>
+
+            <div class="drawer-section-label">Ferramentas do sistema</div>
+            <button class="menu-modo-item" data-icon="AC" data-action="abrir-acordos" type="button"><span class="menu-item-kicker">Modal</span><strong>Acordos</strong></button>
+            <button class="menu-modo-item menu-item-secreto-rs" data-icon="R$" data-action="abrir-acordos-rs" type="button" aria-label="Atalho reservado"><span class="menu-item-kicker">Modal</span><strong>R$ Acordo</strong></button>
+            <button class="menu-modo-item" data-icon="JUS" data-action="abrir-justificativas" type="button"><span class="menu-item-kicker">Modal</span><strong>Justificativas</strong></button>
+            <button class="menu-modo-item" data-icon="BK" data-action="abrir-busca-global" type="button"><span class="menu-item-kicker">Ferramenta</span><strong>Busca global</strong></button>
+            <button class="menu-modo-item" data-icon="IE" data-action="abrir-investigar-equipe" type="button"><span class="menu-item-kicker">Ferramenta</span><strong>Investigar equipe</strong></button>
+            <button class="menu-modo-item" data-icon="CF" data-action="abrir-conflitos" type="button"><span class="menu-item-kicker">Auditoria</span><strong>Conflitos</strong></button>
+            <button class="menu-modo-item" data-icon="LF" data-action="limpar-filtros" type="button"><span class="menu-item-kicker">Tabela</span><strong>Limpar filtros</strong></button>
+            <button class="menu-modo-item" data-icon="UP" data-action="recarregar-dados" type="button"><span class="menu-item-kicker">Dados</span><strong>Atualizar dados</strong></button>
+
+            <div class="drawer-section-label">Exportar e backup</div>
+            <button class="menu-modo-item" data-icon="PR" data-action="imprimir-relatorio" type="button"><span class="menu-item-kicker">Exportar</span><strong>Imprimir</strong></button>
+            <button class="menu-modo-item" data-icon="PDF" data-action="salvar-pdf" type="button"><span class="menu-item-kicker">Exportar</span><strong>Salvar PDF</strong></button>
+            <button class="menu-modo-item" data-icon="PNG" data-action="baixar-imagem" type="button"><span class="menu-item-kicker">Exportar</span><strong>Baixar imagem (PNG)</strong></button>
+            <button class="menu-modo-item" data-icon="BK" data-action="exportar-backup-acordos" type="button"><span class="menu-item-kicker">Acordos</span><strong>Exportar backup</strong></button>
+            <button class="menu-modo-item" data-icon="IN" data-action="importar-backup-acordos" type="button"><span class="menu-item-kicker">Acordos</span><strong>Importar backup</strong></button>
+            <button class="menu-modo-item" data-icon="DG" data-action="abrir-diagnostico" type="button"><span class="menu-item-kicker">Admin</span><strong>Diagnóstico dos dados</strong></button>
+            <button class="menu-modo-item" data-icon="API" data-action="abrir-health" type="button"><span class="menu-item-kicker">API</span><strong>Ver status (health)</strong></button>
+        </div>
+    </div>
+
+    <div id="drawerOverlay" class="drawer-overlay hidden"></div>
+
+    <main class="main-content">
+        <div class="container">
+
+            <div class="statusbar" id="statusbarPrincipal">
+                <div class="menu-acoes menu-acoes-lateral">
+                    <button id="btnMenuModo" class="btn-menu-modo" type="button" aria-label="Abrir menu">
+                        <span class="btn-menu-icon"></span>
+                        <span class="btn-menu-texto">Menu</span>
+                    </button>
+                </div>
+
+                <div class="filtros-esquerda" id="filtrosEsquerda">
+                    <div class="filtro-grupo">
+                        <label for="uoSelect">UO</label>
+                        <select id="uoSelect"></select>
+                    </div>
+
+                    <div class="filtro-grupo" id="grupoData">
+                        <label for="dataSelect">Data</label>
+                        <input type="date" id="dataSelect">
+                    </div>
+
+                    <div class="filtro-grupo" id="grupoHora">
+                        <label for="horaSelect">Hora</label>
+                        <select id="horaSelect">
+                            <option value="">Auto (Ãºltima)</option>
+                            <option value="TOTAL">Tabela total</option>
+                            <option value="09">09h</option>
+                            <option value="11">11h</option>
+                            <option value="13">13h</option>
+                            <option value="15">15h</option>
+                            <option value="17">17h</option>
+                        </select>
+                    </div>
+
+                    <div class="filtro-grupo hidden" id="grupoSemana">
+                        <label for="semanaSelect">Semana</label>
+                        <select id="semanaSelect"></select>
+                    </div>
+
+                    <div class="filtro-grupo hidden" id="grupoMes">
+                        <label for="mesSelect">Mês</label>
+                        <input type="month" id="mesSelect">
+                    </div>
+                </div>
+
+                <div class="filtros-direita" id="filtrosDireita">
+                    <div class="filtro-grupo">
+                        <label for="tipoSelect">Visualizar</label>
+                        <select id="tipoSelect">
+                            <option value="SUPERVISOR">Supervisor</option>
+                            <option value="LIDER DE POSTO">Líder</option>
+                            <option value="CONTROLADOR">Controlador</option>
+                        </select>
+                    </div>
+
+                    <div class="filtro-grupo">
+                        <label for="turnoSelect">Turno</label>
+                        <select id="turnoSelect">
+                            <option value="">Todos</option>
+                            <option value="COMERCIAL">Comercial</option>
+                            <option value="TARDE">Tarde</option>
+                            <option value="MADRUGADA">Madrugada</option>
+                        </select>
+                    </div>
+
+                    <div class="modo-atual" id="modoAtualTxt">Tabela Diária</div>
+
+                    <div class="acoes-relatorio-topo">
+                        <button class="btn-topo-acao" onclick="imprimirRelatorio()" title="Imprimir">🖨</button>
+                        <button class="btn-topo-acao" onclick="salvarRelatorioPDF()" title="Salvar PDF">📄</button>
+                        <button class="btn-topo-acao" onclick="baixarRelatorioImagem()" title="Baixar imagem">⬇</button>
+                    </div>
+                </div>
+            </div>
+
+            <button id="statusDadosTopo" class="status-dados-topo status-carregando" type="button" onclick="abrirModalDiagnostico()" title="Abrir diagnóstico dos dados">
+                <span class="status-dados-ponto"></span>
+                <span id="statusDadosResumo">Verificando atualizaÃ§Ã£o dos dados...</span>
+                <span class="status-dados-fuso">HorÃ¡rio de BrasÃ­lia</span>
+            </button>
+
+            <div id="areaRelatorio">
+                <div id="areaRelatorioPadrao">
+                    <div class="kpis">
+                        <div class="kpi" id="kpiFaixa">
+                            <h4>Class. UO</h4>
+                            <div class="valor" id="kpiFaixaTxt">-</div>
+                        </div>
+
+                        <div class="kpi">
+                            <h4>Meta Hora</h4>
+                            <div class="valor" id="kpiMeta">0</div>
+                        </div>
+
+                        <div class="kpi">
+                            <h4>Prod. Hora</h4>
+                            <div class="valor" id="kpiProd">0</div>
+                        </div>
+
+                        <div class="kpi">
+                            <h4>Saldo US</h4>
+                            <div class="valor" id="kpiSaldo">0</div>
+                        </div>
+
+                        <div class="kpi kpi-aa">
+                            <h4>AA</h4>
+                            <div class="valor" id="kpiAA">0</div>
+                        </div>
+
+                        <div class="kpi hidden" id="cardKpiExecutados">
+                            <h4>Serviços Executados</h4>
+                            <div class="valor" id="kpiExecutados">0</div>
+                        </div>
+
+                        <div class="kpi kpi-a">
+                            <h4>A</h4>
+                            <div class="valor" id="kpiA">0</div>
+                        </div>
+
+                        <div class="kpi hidden" id="cardKpiImprodBruto">
+                            <h4>Serviços Improdutivos</h4>
+                            <div class="valor" id="kpiImprodBruto">0</div>
+                        </div>
+
+                        <div class="kpi kpi-b">
+                            <h4>B</h4>
+                            <div class="valor" id="kpiB">0</div>
+                        </div>
+
+                        <div class="kpi kpi-c">
+                            <h4>C</h4>
+                            <div class="valor" id="kpiC">0</div>
+                        </div>
+
+                        <div class="kpi kpi-d">
+                            <h4>D</h4>
+                            <div class="valor" id="kpiD">0</div>
+                        </div>
+
+                        <div class="kpi">
+                            <h4>Força Trab.</h4>
+                            <div class="valor" id="kpiFT">0</div>
+                        </div>
+
+                    </div>
+
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr id="theadRow"></tr>
+                            </thead>
+                            <tbody id="tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="areaRelatorioNec" class="hidden">
+                    <iframe id="iframeReportNec" class="iframe-report-nec" src="about:blank" data-src="HTML REPORT NEC/report_nec.html" loading="lazy" title="Painel Report NEC"></iframe>
+                </div>
+
+                <div id="areaRelatorioJornada" class="hidden">
+                    <iframe id="iframeReportJornada" class="iframe-report-nec" src="about:blank" data-src="frontend/jornada.html" loading="lazy" title="Report Jornada"></iframe>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- MODAL EQUIPES -->
+    <div id="modalEquipes" class="modal hidden">
+        <div class="modal-content modal-content-equipes">
+            <div class="modal-header">
+                <h3 id="modalTitulo"></h3>
+
+                <div class="acoes-modal">
+                    <div class="acoes-relatorio-topo acoes-modal-topo">
+                        <button class="btn-topo-acao" onclick="imprimirModal()" title="Imprimir modal">🖨</button>
+                        <button class="btn-topo-acao" onclick="salvarModalPDF()" title="Salvar PDF do modal">📄</button>
+                        <button class="btn-topo-acao" onclick="baixarModalImagem()" title="Baixar imagem do modal">⬇</button>
+                    </div>
+
+                    <!-- BOTÃO DE ACORDOS ÀS 17H -->
+
+                    <button class="btn-topo-acao" onclick="exportarBackupAcordos()" title="Salvar backup dos acordos">💾</button>
+                    <button class="btn-topo-acao" onclick="abrirImportacaoBackupAcordos()" title="Restaurar backup dos acordos">📂</button>
+                    <button class="btn-topo-acao" onclick="abrirModalJustificativasEquipes()" title="Ver justificativas das equipes">📝</button>
+
+                    <button id="btnAcordos17"
+                            class="btn-acordo-geral hidden"
+                            type="button"
+                            onclick="abrirModalAcordos()">
+                        ACORDOS
+                    </button>
+
+                    <button id="btnFullscreen"
+                             class="btn-full hidden"
+                             onclick="toggleFullscreenModal()">
+                        ⛶ Tela cheia
+                    </button>
+
+                    <span class="close" onclick="fecharModal()">&times;</span>
+                </div>
+            </div>
+
+            <div class="modal-body" id="areaModalRelatorio">
+                <div id="kpisModalEquipes" class="kpis kpis-modal-equipes">
+                    <div class="kpi kpi-mini" id="cardKpiModalEquipesTotal">
+                        <h4>Equipes</h4>
+                        <div class="valor" id="kpiModalEquipesTotal">0</div>
+                    </div>
+
+                    <div class="kpi kpi-mini">
+                        <h4>Meta</h4>
+                        <div class="valor" id="kpiModalMeta">0.000</div>
+                    </div>
+
+                    <div class="kpi kpi-mini">
+                        <h4>Produção</h4>
+                        <div class="valor" id="kpiModalProd">0.000</div>
+                    </div>
+
+                    <div class="kpi kpi-mini">
+                        <h4>% Prod. Dia</h4>
+                        <div class="valor" id="kpiModalPerc">0.00%</div>
+                    </div>
+
+                    <div class="kpi kpi-mini kpi-d" id="cardKpiModalEqD">
+                        <h4>Eq. D</h4>
+                        <div class="valor" id="kpiModalEqD">0</div>
+                    </div>
+
+                    <div class="kpi kpi-mini">
+                        <h4>% Improd.</h4>
+                        <div class="valor" id="kpiModalImprod">0.00%</div>
+                    </div>
+
+                    <div class="kpi kpi-mini" id="cardKpiModalPercEqD">
+                        <h4>% Eq. D</h4>
+                        <div class="valor" id="kpiModalPercEqD">0.00%</div>
+                    </div>
+
+                    <div class="kpi kpi-mini kpi-a" id="cardKpiModalJornadaCompleta">
+                        <h4>Jorn. Comp.</h4>
+                        <div class="valor" id="kpiModalPercJornadaCompleta">0</div>
+                    </div>
+
+                    <div class="kpi kpi-mini kpi-d" id="cardKpiModalJornadaIncompleta">
+                        <h4>Jorn. Incomp.</h4>
+                        <div class="valor" id="kpiModalPercJornadaIncompleta">0</div>
+                    </div>
+
+                    <div class="kpi kpi-mini" id="cardKpiModalSemAtendimento">
+                        <h4>Sem Atend.</h4>
+                        <div class="valor" id="kpiModalPercSemAtendimento">0</div>
+                    </div>
+
+                    <div class="kpi kpi-mini" id="cardKpiModalEquipesAcordadas">
+                        <h4>Eq. Acordadas</h4>
+                        <div class="valor" id="kpiModalEquipesAcordadas">0</div>
+                    </div>
+
+                    <div class="kpi kpi-mini" id="cardKpiModalEquipesJustificadas">
+                        <h4>Eqps Justificadas</h4>
+                        <div class="valor" id="kpiModalEquipesJustificadas">0</div>
+                    </div>
+                </div>
+
+                <div class="table-wrap table-wrap-modal">
+                <table class="modal-tabela modal-tabela-equipes">
+                    <thead>
+                        <tr>
+                            <th>Cód. Eq.</th>
+                            <th class="col-equipe">Equipes</th>
+                            <th class="col-acordo">Acordo</th>
+                            <th>Meta</th>
+                            <th>Prod.</th>
+                            <th>Faixa<br>Dia</th>
+                            <th>% PROD.DIA</th>
+                            <th>09h</th>
+                            <th>11h</th>
+                            <th>13h</th>
+                            <th>15h</th>
+                            <th>17h</th>
+                            <th>Serv.</th>
+                            <th>Prod.</th>
+                            <th>Improd.</th>
+                            <th>% IMPROD.</th>
+                            <th>1º<br>ATEND.</th>
+                            <th>ULT.<br>ATEND.</th>
+                            <th>JORNADA<br>PROD.</th>
+                            <th>STATUS<br>JORNADA</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modalBody"></tbody>
+                </table>
+                </div>
+
+                <div id="painelJustificativaOverlay" class="painel-justificativa-overlay hidden" onclick="fecharPainelJustificativa()"></div>
+
+                <div id="painelJustificativa" class="painel-justificativa hidden">
+                    <div class="painel-justificativa-header">
+                        <div class="painel-justificativa-header-copy">
+                            <span class="painel-justificativa-kicker">Painel da Equipe</span>
+                            <h4 id="painelJustificativaTitulo">Justificativa</h4>
+                        </div>
+                        <button type="button" class="painel-justificativa-fechar" onclick="fecharPainelJustificativa()">&times;</button>
+                    </div>
+
+                    <div class="painel-justificativa-kpis" id="painelJustificativaKpis">
+                        <div class="painel-justificativa-kpi">
+                            <span>Cód. / Frota</span>
+                            <strong id="painelJustificativaKpiCodigo">-</strong>
+                        </div>
+                        <div class="painel-justificativa-kpi">
+                            <span>Meta Dia</span>
+                            <strong id="painelJustificativaKpiMeta">0.000</strong>
+                        </div>
+                        <div class="painel-justificativa-kpi">
+                            <span>Produção</span>
+                            <strong id="painelJustificativaKpiProd">0.000</strong>
+                        </div>
+                        <div class="painel-justificativa-kpi">
+                            <span>Saldo</span>
+                            <strong id="painelJustificativaKpiSaldo">0.000</strong>
+                        </div>
+                        <div class="painel-justificativa-kpi">
+                            <span>Faixa Dia</span>
+                            <strong id="painelJustificativaKpiFaixa">-</strong>
+                        </div>
+                        <div class="painel-justificativa-kpi">
+                            <span>Status</span>
+                            <strong id="painelJustificativaKpiStatus">-</strong>
+                        </div>
+                        <div class="painel-justificativa-kpi">
+                            <span>Serviços</span>
+                            <strong id="painelJustificativaKpiServicos">0</strong>
+                        </div>
+                        <div class="painel-justificativa-kpi">
+                            <span>Produtivos</span>
+                            <strong id="painelJustificativaKpiProdutivos">0</strong>
+                        </div>
+                        <div class="painel-justificativa-kpi">
+                            <span>Improdutivos</span>
+                            <strong id="painelJustificativaKpiImprodutivos">0</strong>
+                        </div>
+                        <div class="painel-justificativa-kpi">
+                            <span>% Improdutivo</span>
+                            <strong id="painelJustificativaKpiPercImprod">0.00%</strong>
+                        </div>
+                    </div>
+
+                    <div class="painel-justificativa-fields">
+                        <div class="painel-justificativa-field">
+                            <label for="justGrupoSearch">Grupo</label>
+                            <input id="justGrupoSearch" type="search" class="painel-justificativa-search" placeholder="Pesquisar grupo...">
+                            <div id="justGrupoSelected" class="painel-justificativa-selected hidden"></div>
+                            <div id="justGrupoList" class="painel-justificativa-list" role="listbox" aria-label="Lista de grupos"></div>
+                        </div>
+                        <div class="painel-justificativa-field">
+                            <label for="justDescSearch">Descrição</label>
+                            <input id="justDescSearch" type="search" class="painel-justificativa-search" placeholder="Pesquisar descrição...">
+                            <div id="justDescSelected" class="painel-justificativa-selected hidden"></div>
+                            <div id="justDescList" class="painel-justificativa-list" role="listbox" aria-label="Lista de descrições"></div>
+                        </div>
+                    </div>
+                    <div class="painel-justificativa-preview" id="justificativaPreview"></div>
+                    <textarea id="painelJustificativaTexto" class="painel-justificativa-texto" placeholder="Digite a justificativa..."></textarea>
+                    <div class="painel-justificativa-acoes">
+                        <button type="button" class="btn-justificativa-cancelar" onclick="abrirCodxPainelJustificativa()">Abrir COD-X</button>
+                        <button type="button" class="btn-justificativa-salvar" onclick="salvarJustificativaAtual()">Salvar</button>
+                        <button type="button" class="btn-justificativa-excluir hidden" id="btnExcluirJustificativa" onclick="excluirJustificativaAtual()">Excluir</button>
+                        <button type="button" class="btn-justificativa-cancelar" onclick="fecharPainelJustificativa()">Cancelar</button>
+                    </div>
+                </div>
+
+                <div id="caixaDetalheFaixa" class="caixa-faixa-equipe hidden">
+                    <div class="caixa-faixa-header">
+                        <h4 id="caixaDetalheFaixaTitulo">Resumo da Equipe</h4>
+                        <button type="button" class="caixa-faixa-fechar" onclick="fecharCaixaDetalheFaixa()">&times;</button>
+                    </div>
+
+                    <div class="caixa-faixa-grid">
+                        <div class="caixa-faixa-item" id="cardDetalheFaixaProd">
+                            <span>Produção da Faixa</span>
+                            <strong id="detalheFaixaProd" title="">0.000</strong>
+                        </div>
+
+                        <div class="caixa-faixa-item" id="cardDetalheFaixaMeta">
+                            <span>Meta do Dia</span>
+                            <strong id="detalheFaixaMeta">0.000</strong>
+                        </div>
+
+                        <div class="caixa-faixa-item" id="cardDetalheFaixaSaldo">
+                            <span>Saldo</span>
+                            <strong id="detalheFaixaMetaDia">0.000</strong>
+                        </div>
+
+                        <div class="caixa-faixa-item caixa-faixa-item-faixa" id="cardDetalheEquipeFaixaDia">
+                            <span>Faixa Dia</span>
+                            <strong id="detalheEquipeFaixaDia">-</strong>
+                        </div>
+
+                        <div class="caixa-faixa-item">
+                            <span>Status Jornada</span>
+                            <strong id="detalheEquipeStatus">-</strong>
+                        </div>
+
+                        <div class="caixa-faixa-item">
+                            <span>% Improdutivo</span>
+                            <strong id="detalheEquipeImprod">0.00%</strong>
+                        </div>
+
+                        <div class="caixa-faixa-item">
+                            <span>Serviços</span>
+                            <strong id="detalheEquipeServicos">0</strong>
+                        </div>
+
+                        <div class="caixa-faixa-item">
+                            <span>Produtivos</span>
+                            <strong id="detalheEquipeProdutivos">0</strong>
+                        </div>
+
+                        <div class="caixa-faixa-item">
+                            <span>Improdutivos</span>
+                            <strong id="detalheEquipeImprodutivos">0</strong>
+                        </div>
+
+                        <div class="caixa-faixa-item">
+                            <span>Inicio Jornada</span>
+                            <strong id="detalheEquipeInicioJornada">-</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DETALHE FAIXA DIA (AO CLICAR NA COLUNA "FAIXA DIA") -->
+                <div id="caixaDetalheFaixaDia" class="caixa-faixa-dia hidden">
+                    <div class="caixa-faixa-dia-card">
+                        <div class="caixa-faixa-dia-header">
+                            <h4 id="caixaFaixaDiaTitulo">Detalhe da Equipe</h4>
+                            <button type="button" class="caixa-faixa-fechar" onclick="fecharCaixaDetalheFaixaDia()">&times;</button>
+                        </div>
+
+                        <div class="faixa-dia-campos">
+                            <div class="faixa-dia-campo">
+                                <label>Líder de Posto:</label>
+                                <div class="faixa-dia-campo-valor" id="caixaFaixaDiaLider">-</div>
+                            </div>
+                            <div class="faixa-dia-campo">
+                                <label>Controlador:</label>
+                                <div class="faixa-dia-campo-valor" id="caixaFaixaDiaControlador">-</div>
+                            </div>
+                        </div>
+
+                        <div class="faixa-dia-kpis">
+                            <div class="faixa-dia-kpi">
+                                <span>U.O</span>
+                                <strong id="caixaFaixaDiaUo">-</strong>
+                            </div>
+                            <div class="faixa-dia-kpi faixa-dia-kpi-faixa">
+                                <span>Faixa Dia</span>
+                                <strong id="caixaFaixaDiaFaixa">-</strong>
+                            </div>
+                            <div class="faixa-dia-kpi">
+                                <span>Qtde. Cod.-X</span>
+                                <strong id="caixaFaixaDiaQtdCodx">0</strong>
+                            </div>
+                            <div class="faixa-dia-kpi">
+                                <span>Tempo total de interferência (min)</span>
+                                <strong id="caixaFaixaDiaTempoTotal">0</strong>
+                            </div>
+                        </div>
+
+                        <div class="faixa-dia-obs">
+                            <label for="caixaFaixaDiaObservacao">Observação:</label>
+                            <textarea id="caixaFaixaDiaObservacao" class="faixa-dia-obs-texto" readonly></textarea>
+                        </div>
+
+                        <div class="table-wrap">
+                            <table class="modal-tabela tabela-codx">
+                                <thead>
+                                    <tr>
+                                        <th>CODIGO_X</th>
+                                        <th>CODIGO X DESCRIÇÃO</th>
+                                        <th>TEMPO_MINUTOS</th>
+                                        <th>OBS_COD_X</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="caixaFaixaDiaCodxBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL ESTRATIFICACAO DE SERVICOS -->
+    <div id="modalControleServico" class="modal hidden">
+        <div class="modal-content modal-controle-servico">
+            <div class="controle-servico-frame">
+                <div class="controle-servico-topo">
+                    <div class="controle-servico-titulo">ESTRATIFICAÇÃO DE SERVIÇOS</div>
+                </div>
+
+                <div class="controle-servico-card">
+                    <div class="controle-servico-card-head">
+                        <div class="controle-servico-card-title" id="modalControleServicoTitulo"></div>
+                        <div class="controle-servico-card-actions">
+                            <button type="button" class="controle-servico-codx" onclick="abrirCodxControleServico()">Abrir COD-X</button>
+                            <button type="button" class="controle-servico-expand" onclick="toggleFullscreenControleServico()">Expandir</button>
+                            <button type="button" class="controle-servico-fechar" onclick="fecharModalControleServico()">&times;</button>
+                        </div>
+                    </div>
+
+                    <div class="controle-servico-card-sub" id="modalControleServicoSubtitle"></div>
+
+                    <div class="controle-servico-dupla">
+                        <div class="controle-servico-field">
+                            <label>Lider de Posto:</label>
+                            <div class="controle-servico-field-value" id="controleServicoLider">-</div>
+                        </div>
+                        <div class="controle-servico-field">
+                            <label>Controlador:</label>
+                            <div class="controle-servico-field-value" id="controleServicoControlador">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="controle-servico-kpis">
+                    <div class="controle-servico-kpi">
+                        <div class="controle-servico-kpi-title">SERVICOS DESIGNADOS</div>
+                        <div class="controle-servico-kpi-value" id="controleServicoTotal">0</div>
+                    </div>
+                    <div class="controle-servico-kpi">
+                        <div class="controle-servico-kpi-title">SERVICOS REALIZADOS</div>
+                        <div class="controle-servico-kpi-value" id="controleServicoRealizados">0</div>
+                    </div>
+                    <div class="controle-servico-kpi">
+                        <div class="controle-servico-kpi-title">META DO DIA</div>
+                        <div class="controle-servico-kpi-value" id="controleServicoMetaDia">0.000</div>
+                    </div>
+                    <div class="controle-servico-kpi">
+                        <div class="controle-servico-kpi-title">U.S PREVISTAS</div>
+                        <div class="controle-servico-kpi-value" id="controleServicoUsPrev">0</div>
+                    </div>
+                    <div class="controle-servico-kpi">
+                        <div class="controle-servico-kpi-title">U.S EXECUTADAS</div>
+                        <div class="controle-servico-kpi-value" id="controleServicoUsExec">0</div>
+                    </div>
+                    <div class="controle-servico-kpi">
+                        <div class="controle-servico-kpi-title">PRODUTIVOS</div>
+                        <div class="controle-servico-kpi-value" id="controleServicoProdutivos">0</div>
+                    </div>
+                    <div class="controle-servico-kpi">
+                        <div class="controle-servico-kpi-title">IMPRODUTIVOS</div>
+                        <div class="controle-servico-kpi-value" id="controleServicoImprodutivos">0</div>
+                    </div>
+                    <div class="controle-servico-kpi">
+                        <div class="controle-servico-kpi-title">% IMPEDIMENTO</div>
+                        <div class="controle-servico-kpi-value controle-servico-kpi-ok" id="controleServicoPercImpedimento">0.00%</div>
+                    </div>
+                    <div class="controle-servico-kpi">
+                        <div class="controle-servico-kpi-title">1º ATENDIMENTO</div>
+                        <div class="controle-servico-kpi-value" id="controleServicoPrimeiroAtend">-</div>
+                    </div>
+                    <div class="controle-servico-kpi">
+                        <div class="controle-servico-kpi-title">ULTIMO ATENDIMENTO</div>
+                        <div class="controle-servico-kpi-value" id="controleServicoUltimoAtend">-</div>
+                    </div>
+                    <div class="controle-servico-kpi">
+                        <div class="controle-servico-kpi-title">TOTAL TEMPO LACUNA</div>
+                        <div class="controle-servico-kpi-value" id="controleServicoTempoLacuna">00:00</div>
+                    </div>
+                </div>
+
+                <div class="controle-servico-tabela">
+                    <table class="controle-servico-table">
+                        <thead>
+                            <tr>
+                                <th>EQUIPES</th>
+                                <th>SERVICO</th>
+                                <th>TIPO DE SERVICO</th>
+                                <th>SITUACAO</th>
+                                <th>PRODUTIVO</th>
+                                <th>COD. ATIV.</th>
+                                <th>U.S PREV.</th>
+                                <th>U.S EXEC.</th>
+                                <th>DESIGNACAO</th>
+                                <th>ACIONAMENTO</th>
+                                <th>LOCALIZACAO</th>
+                                <th>ENCERRAMENTO</th>
+                                <th>AREA</th>
+                                <th>LACUNA</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalControleServicoBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE ACORDOS -->
+    <div id="modalAcordos" class="modal hidden">
+        <div class="modal-content modal-acordos">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <h3 id="modalAcordosTitulo">ACORDOS DO SUPERVISOR</h3>
+                    <div id="acordosMeta" class="modal-subtitle modal-subtitle-inline"></div>
+                </div>
+
+                <div class="acoes-modal">
+                    <div class="acoes-relatorio-topo acoes-modal-topo">
+                        <button class="btn-topo-acao" onclick="imprimirModalAcordos()" title="Imprimir acordos">🖨</button>
+                        <button class="btn-topo-acao" onclick="salvarModalAcordosPDF()" title="Salvar PDF dos acordos">📄</button>
+                        <button class="btn-topo-acao" onclick="baixarModalAcordosImagem()" title="Baixar imagem dos acordos">⬇</button>
+                    </div>
+
+                    <span class="close" onclick="fecharModalAcordos()">&times;</span>
+                </div>
+            </div>
+
+            <div class="modal-body" id="areaModalAcordos">
+                <div id="historicoAcordosFiltros" class="justificativas-historico-filtros hidden">
+                    <div class="filtro-grupo">
+                        <label for="historicoAcordoPeriodo">Período</label>
+                        <select id="historicoAcordoPeriodo">
+                            <option value="diario">Diário</option>
+                            <option value="semanal">Semanal</option>
+                            <option value="mensal">Mensal</option>
+                        </select>
+                    </div>
+                    <div class="filtro-grupo" id="grupoHistoricoAcordoData">
+                        <label for="historicoAcordoData">Data</label>
+                        <input id="historicoAcordoData" type="date">
+                    </div>
+                    <div class="filtro-grupo hidden" id="grupoHistoricoAcordoMes">
+                        <label for="historicoAcordoMes">Mês</label>
+                        <input id="historicoAcordoMes" type="month">
+                    </div>
+                    <div class="filtro-grupo">
+                        <label for="historicoAcordoUo">UO</label>
+                        <select id="historicoAcordoUo">
+                            <option value="">Todas</option>
+                        </select>
+                    </div>
+                    <div class="filtro-grupo filtro-grupo-supervisor">
+                        <label for="historicoAcordoSupervisor">Supervisor</label>
+                        <select id="historicoAcordoSupervisor">
+                            <option value="">Todos</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="kpisAcordos" class="kpis kpis-acordos">
+                    <div class="kpi">
+                        <h4 id="kpiAcordoAnalisadasLabel">Qtde. Eq. D Analisadas</h4>
+                        <div class="valor" id="kpiAcordoAnalisadas">0</div>
+                    </div>
+
+                    <div class="kpi">
+                        <h4 id="kpiAcordoMarcadasLabel">Qtde. Eq. D Acordadas</h4>
+                        <div class="valor" id="kpiAcordoMarcadas">0</div>
+                    </div>
+
+                    <div class="kpi">
+                        <h4 id="kpiAcordoPercAcordadasLabel">% Eq. Acordadas</h4>
+                        <div class="valor" id="kpiAcordoPercAcordadas">0%</div>
+                    </div>
+
+                    <div class="kpi">
+                        <h4 id="kpiAcordoCumpridoLabel">Qtde. Eq. Acordo Cumprido</h4>
+                        <div class="valor" id="kpiAcordoCumprido">0</div>
+                    </div>
+
+                    <div class="kpi">
+                        <h4 id="kpiAcordoNaoCumpridoLabel">Qtde. Eq. Acordo NÃ£o Cumprido</h4>
+                        <div class="valor" id="kpiAcordoNaoCumprido">0</div>
+                    </div>
+
+                    <div class="kpi">
+                        <h4>Eficácia do Acordo</h4>
+                        <div class="valor" id="kpiAcordoEficacia">0%</div>
+                    </div>
+        
+                </div>
+
+                <div class="table-wrap">
+                    <table class="modal-tabela tabela-acordos">
+                        <thead>
+                            <tr id="theadAcordosRow">
+                                <th>Cód. Eq.</th>
+                                <th>Frota</th>
+                                <th class="col-equipe">Equipes</th>
+                                <th>Meta</th>
+                                <th>Prod. Acordo</th>
+                                <th>Faixa Acordo</th>
+                                <th>% PROD. Acordo</th>
+                                <th>09h</th>
+                                <th>11h</th>
+                                <th>13h</th>
+                                <th>15h</th>
+                                <th>17h</th>
+                                <th>Serv.</th>
+                                <th>Prod.</th>
+                                <th>Improd.</th>
+                                <th>% IMPROD.</th>
+                                <th>1º<br>ATEND.</th>
+                                <th>ULT.<br>ATEND.</th>
+                                <th>JORNADA<br>PROD.</th>
+                                <th id="thAcordoMomento">ACORDO</th>
+                                <th id="thStatusAcordo">STATUS<br>ACORDO FIM DO DIA</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalAcordosBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL R$ ACORDOS -->
+    <div id="modalAcordosRs" class="modal hidden">
+        <div class="modal-content modal-acordos modal-acordos-rs">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <h3 id="modalAcordosRsTitulo">R$ ACORDOS</h3>
+                    <div class="acordos-rs-filtro">
+                        <label for="acordosRsSupervisorSelect">Supervisor:</label>
+                        <select id="acordosRsSupervisorSelect">
+                            <option value="">Todos</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="acoes-modal">
+                    <span class="close" onclick="fecharModalAcordosRs()">&times;</span>
+                </div>
+            </div>
+
+            <div class="modal-body" id="areaModalAcordosRs">
+                <div id="kpisAcordosRs" class="kpis kpis-acordos">
+                    <div class="kpi kpi-clickable" id="cardKpiAcordoRsQtd" onclick="aplicarFiltroAcordosRs('todas')">
+                        <h4>Total Eqp</h4>
+                        <div class="valor" id="kpiAcordoRsQtd">0</div>
+                    </div>
+                    <div class="kpi">
+                        <h4>Meta (R$)</h4>
+                        <div class="valor" id="kpiAcordoRsMeta">R$ 0,00</div>
+                    </div>
+                    <div class="kpi">
+                        <h4>Prod. Momento Acordo (R$)</h4>
+                        <div class="valor" id="kpiAcordoRsProdMomento">R$ 0,00</div>
+                    </div>
+                    <div class="kpi">
+                        <h4>Previsão (R$)</h4>
+                        <div class="valor" id="kpiAcordoRsPrev">R$ 0,00</div>
+                    </div>
+                    <div class="kpi">
+                        <h4>Fechamento Dia (R$)</h4>
+                        <div class="valor" id="kpiAcordoRsFech">R$ 0,00</div>
+                    </div>
+                    <div class="kpi">
+                        <h4>Valor a Recuperar</h4>
+                        <div class="valor" id="kpiAcordoRsValorAcordo">R$ 0,00</div>
+                    </div>
+                    <div class="kpi" id="cardKpiAcordoRsRecuperacao">
+                        <h4>Recuperação (R$)</h4>
+                        <div class="valor" id="kpiAcordoRsRecuperacao">R$ 0,00</div>
+                    </div>
+                    <div class="kpi kpi-clickable" id="cardKpiAcordoRsAcordadas" onclick="aplicarFiltroAcordosRs('acordadas')">
+                        <h4>Equipes Acordadas</h4>
+                        <div class="valor" id="kpiAcordoRsAcordadas">0</div>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table class="modal-tabela tabela-acordos-rs">
+                        <thead>
+                            <tr>
+                                <th colspan="3"></th>
+                                <th colspan="6">SITUAÇÃO MOMENTO DO ACORDO</th>
+                                <th colspan="4">TENDÊNCIA DE FECHAMENTO DO DIA</th>
+                                <th colspan="5">FECHAMENTO DO DIA</th>
+                            </tr>
+                            <tr>
+                                <th>Cód. Eq.</th>
+                                <th>Frota</th>
+                                <th class="col-equipe">Equipes</th>
+                                <th>Meta</th>
+                                <th>Meta (R$)</th>
+                                <th>Prod.</th>
+                                <th>Prod. (R$)</th>
+                                <th>Faixa Dia</th>
+                                <th>% PROD.DIA</th>
+                                <th>Previsão<br>Prod.</th>
+                                <th>Previsão<br>% Meta</th>
+                                <th>Faixa Dia -</th>
+                                <th>Previsão<br>(R$)</th>
+                                <th>Prod.</th>
+                                <th>% PROD.DIA</th>
+                                <th>Faixa Dia</th>
+                                <th>Prod. (R$)</th>
+                                <th>Recuperado (R$)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalAcordosRsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL CONFLITOS -->
+    <div id="modalConflitos" class="modal hidden">
+        <div class="modal-content modal-acordos modal-conflitos">
+            <div class="modal-header">
+                <h3 id="modalConflitosTitulo">CONFLITOS</h3>
+
+                <div class="acoes-modal">
+                    <span class="close" onclick="fecharModalConflitos()">&times;</span>
+                </div>
+            </div>
+
+            <div class="modal-body" id="areaModalConflitos">
+                <div class="kpis kpis-acordos">
+                    <div class="kpi">
+                        <h4>Equipes com conflito</h4>
+                        <div class="valor" id="kpiConflitosQtd">0</div>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table class="modal-tabela tabela-conflitos">
+                        <thead>
+                            <tr>
+                                <th>Cód. Eq.</th>
+                                <th class="col-equipe">Equipe</th>
+                                <th>Linhas</th>
+                                <th>Supervisor</th>
+                                <th>Líder de posto</th>
+                                <th>Controlador</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalConflitosBody"></tbody>
+                    </table>
+                </div>
+
+                <div class="conflito-detalhe-box" id="conflitoDetalheBox">
+                    <h4 id="conflitoDetalheTitulo">Selecione uma equipe para ver as linhas do conflito.</h4>
+                    <div class="table-wrap">
+                        <table class="modal-tabela tabela-conflitos-detalhe">
+                            <thead>
+                                <tr>
+                                    <th>Hora</th>
+                                    <th class="col-equipe">Equipe</th>
+                                    <th>Supervisor</th>
+                                    <th>Líder</th>
+                                    <th>Controlador</th>
+                                    <th>Meta</th>
+                                    <th>Prod.</th>
+                                </tr>
+                            </thead>
+                            <tbody id="conflitoDetalheBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE JUSTIFICATIVAS -->
+    <div id="modalJustificativas" class="modal hidden">
+        <div class="modal-content modal-justificativas">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <h3 id="modalJustificativasTitulo">JUSTIFICATIVAS DAS EQUIPES</h3>
+                    <div id="justificativasMeta" class="modal-subtitle modal-subtitle-inline"></div>
+                </div>
+
+                <div class="acoes-modal">
+                    <div class="acoes-relatorio-topo acoes-modal-topo">
+                        <button class="btn-topo-acao" onclick="baixarModalJustificativasImagem()" title="Baixar imagem (gráfico + tabela)">⬇</button>
+                    </div>
+                    <button id="btnFullscreenJustificativas"
+                            class="btn-full"
+                            onclick="toggleFullscreenJustificativas()">
+                        ⛶ Tela cheia
+                    </button>
+                    <span class="close" onclick="fecharModalJustificativas()">&times;</span>
+                </div>
+            </div>
+
+            <div class="modal-body" id="areaModalJustificativas">
+                <div id="historicoJustificativasFiltros" class="justificativas-historico-filtros hidden">
+                    <div class="filtro-grupo">
+                        <label for="historicoJustPeriodo">Período</label>
+                        <select id="historicoJustPeriodo">
+                            <option value="diario">Diário</option>
+                            <option value="semanal">Semanal</option>
+                            <option value="mensal">Mensal</option>
+                        </select>
+                    </div>
+                    <div class="filtro-grupo" id="grupoHistoricoJustData">
+                        <label for="historicoJustData">Data</label>
+                        <input id="historicoJustData" type="date">
+                    </div>
+                    <div class="filtro-grupo hidden" id="grupoHistoricoJustMes">
+                        <label for="historicoJustMes">Mês</label>
+                        <input id="historicoJustMes" type="month">
+                    </div>
+                    <div class="filtro-grupo">
+                        <label for="historicoJustUo">UO</label>
+                        <select id="historicoJustUo">
+                            <option value="">Todas</option>
+                        </select>
+                    </div>
+                    <div class="filtro-grupo filtro-grupo-supervisor">
+                        <label for="historicoJustSupervisor">Supervisor</label>
+                        <select id="historicoJustSupervisor">
+                            <option value="">Todos</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="justificativas-detalhe">
+                    <div class="justificativas-detalhe-header">
+                        <h4 id="justificativasDetalheEquipe">Selecione uma equipe</h4>
+                        <button type="button" class="btn-topo-acao" onclick="copiarJustificativaDetalhe()" title="Copiar justificativa">📋</button>
+                    </div>
+                    <textarea id="justificativasDetalheTexto" class="justificativas-detalhe-texto" readonly placeholder="Clique em uma linha para ver a justificativa aqui..."></textarea>
+                </div>
+
+                <div class="kpis kpis-justificativas" id="kpisJustificativas">
+                    <div class="kpi kpi-mini kpi-muted" id="cardKpiJustTotal">
+                        <h4>Eq. Total</h4>
+                        <div class="valor" id="kpiJustTotal">0</div>
+                    </div>
+                    <div class="kpi kpi-mini kpi-clickable" id="cardKpiJustEqD" onclick="aplicarFiltroJustificativas('d')" title="Filtrar somente equipes D">
+                        <h4>Eq. D Final</h4>
+                        <div class="valor" id="kpiJustEqD">0</div>
+                    </div>
+                    <div class="kpi kpi-mini kpi-clickable" id="cardKpiJustDNaoAcordadas" onclick="aplicarFiltroJustificativas('d-nao-acordadas')" title="Filtrar equipes D não acordadas">
+                        <h4>Eq. D Não Acord.</h4>
+                        <div class="valor" id="kpiJustDNaoAcordadas">0</div>
+                    </div>
+                    <div class="kpi kpi-mini kpi-clickable" id="cardKpiJustAcordadas" onclick="aplicarFiltroJustificativas('acordadas')" title="Filtrar equipes acordadas">
+                        <h4>Eq. Acordadas</h4>
+                        <div class="valor" id="kpiJustAcordadas">0</div>
+                    </div>
+                    <div class="kpi kpi-mini kpi-clickable" id="cardKpiJustJustificadas" onclick="aplicarFiltroJustificativas('justificadas')" title="Filtrar equipes com justificativa">
+                        <h4>Eq. c/ Justif.</h4>
+                        <div class="valor" id="kpiJustJustificadas">0</div>
+                    </div>
+                    <div class="kpi kpi-mini kpi-muted" id="cardKpiJustPercAcordadas">
+                        <h4>% Eq. Acordadas</h4>
+                        <div class="valor" id="kpiJustPercAcordadas">0%</div>
+                    </div>
+                    <div class="kpi kpi-mini kpi-muted" id="cardKpiJustPercJustificadas">
+                        <h4>% Eq. Justificadas</h4>
+                        <div class="valor" id="kpiJustPercJustificadas">0%</div>
+                    </div>
+                    <div class="kpi kpi-mini kpi-muted" id="cardKpiJustDetalhe">
+                        <h4>Justif. c/ Detalhe</h4>
+                        <div class="valor" id="kpiJustDetalhe">0</div>
+                    </div>
+                    <div class="kpi kpi-mini kpi-muted" id="cardKpiJustUltimoSalvo">
+                        <h4>Últ. Salvamento</h4>
+                        <div class="valor" id="kpiJustUltimoSalvo">-</div>
+                    </div>
+                </div>
+
+                <div class="justificativas-headline" id="justificativasHeadline">
+                    JUSTIFICATIVAS EQUIPES <span class="pill pill-d">D</span> <span id="justificativasHeadlineTxt">NÃO ACORDADAS</span>
+                </div>
+
+                <div id="areaJustificativasExport">
+                    <div class="justificativas-chart" id="justificativasChart"></div>
+
+                    <div class="table-wrap">
+                        <table class="modal-tabela tabela-justificativas" id="tabelaJustificativas">
+                            <thead>
+                                <tr>
+                                    <th>Cód. Eq.</th>
+                                    <th>Frota</th>
+                                    <th class="col-equipe">Equipes</th>
+                                    <th class="col-grupo">Grupo</th>
+                                    <th class="col-desc">Descrição</th>
+                                    <th class="col-just">Justificativa</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modalJustificativasBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DIAGNOSTICO DOS DADOS -->
+    <div id="modalDiagnosticoDados" class="modal hidden">
+        <div class="modal-content modal-diagnostico-dados">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <h3>DiagnÃ³stico dos Dados</h3>
+                    <div class="modal-subtitle modal-subtitle-inline">HorÃ¡rio de BrasÃ­lia</div>
+                </div>
+                <div class="acoes-modal">
+                    <span class="close" onclick="fecharModalDiagnostico()">&times;</span>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div id="diagnosticoDadosAlertas" class="diagnostico-alertas"></div>
+                <div id="diagnosticoDadosGrid" class="diagnostico-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL BUSCA GLOBAL -->
+    <div id="modalBuscaGlobal" class="modal hidden">
+        <div class="modal-content modal-ferramenta">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <h3>Busca global de equipe</h3>
+                    <div class="modal-subtitle modal-subtitle-inline">Localiza por equipe, frota, codigo, supervisor, lider ou controlador</div>
+                </div>
+                <div class="acoes-modal">
+                    <span class="close" onclick="fecharBuscaGlobal()">&times;</span>
+                </div>
+            </div>
+            <div class="modal-body">
+                <input id="buscaGlobalInput" class="input-ferramenta" type="search" placeholder="Digite equipe, frota, codigo, supervisor, lider ou controlador">
+                <div id="buscaGlobalResultados" class="resultados-ferramenta"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL INVESTIGAR EQUIPE -->
+    <div id="modalInvestigarEquipe" class="modal hidden">
+        <div class="modal-content modal-ferramenta">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <h3>Investigar equipe</h3>
+                    <div class="modal-subtitle modal-subtitle-inline">Procure por nome, frota ou codigo</div>
+                </div>
+                <div class="acoes-modal">
+                    <span class="close" onclick="fecharInvestigarEquipe()">&times;</span>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="linha-ferramenta">
+                    <input id="investigarEquipeInput" class="input-ferramenta" type="search" placeholder="Ex.: BH-MFLG-TC-MARCELO MARTINS DA SILVA">
+                    <button class="btn-ferramenta" type="button" onclick="executarInvestigacaoEquipe()">Investigar</button>
+                </div>
+                <div id="investigarEquipeResultado" class="resultados-ferramenta"></div>
+            </div>
+        </div>
+    </div>
+
+    <input id="inputImportarBackupAcordos" type="file" accept=".json,application/json" class="hidden">
+
+    <footer id="footerPrincipal">
+        <div class="footer-top">
+            <img src="img/logo.NCSR.jpg" alt="NCSR ENERGIA" class="footer-logo">
+            <div class="footer-center">
+                <div class="footer-compromisso">
+                    Nosso Compromisso está com a Entrega, Segurança e Redução do CHI
+                </div>
+                <div class="footer-nome" id="p2">NCSR ENERGIA</div>
+            </div>
+            <img src="img/logo.PCP.jpg" alt="PCP SISTEMAS" class="footer-logo">
+        </div>
+        <hr class="footer-divider">
+        <div class="footer-bottom">
+            2026 | Gerência NCSR <span class="bar">|</span>
+            <a href="#">All rights reserved.</a>
+        </div>
+    </footer>
+
+    <script src="script.js?v=20260505-lite1"></script>
+</body>
+</html>

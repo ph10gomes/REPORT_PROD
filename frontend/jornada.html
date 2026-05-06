@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Report Jornada</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-topbar">
+      <div class="topbar-main">
+        <button class="btn-menu-erp" type="button" onclick="abrirMenuPrincipal()" aria-label="Abrir menu">☰</button>
+        <div class="topbar-copy">
+          <span class="eyebrow">Operações de Campo</span>
+          <h1>Report Jornada</h1>
+        </div>
+      </div>
+      <div class="status-bar" id="statusBar">Carregando dados...</div>
+    </header>
+
+    <section class="toolbar">
+      <div class="filtro">
+        <label class="label" for="filtroUO">UO</label>
+        <select id="filtroUO">
+          <option value="">GERAL</option>
+        </select>
+      </div>
+
+      <div class="filtro">
+        <label class="label" for="filtroSupervisor">Supervisor</label>
+        <select id="filtroSupervisor">
+          <option value="">TODOS</option>
+        </select>
+      </div>
+
+      <div class="filtro">
+        <label class="label" for="filtroLider">Líder de Posto</label>
+        <select id="filtroLider">
+          <option value="">TODOS</option>
+        </select>
+      </div>
+
+      <div class="filtro">
+        <label class="label" for="filtroControlador">Controlador</label>
+        <select id="filtroControlador">
+          <option value="">TODOS</option>
+        </select>
+      </div>
+
+      <div class="filtro">
+        <label class="label" for="filtroTipoPeriodo">Período</label>
+        <select id="filtroTipoPeriodo">
+          <option value="dia">Diário</option>
+          <option value="semana">Semanal</option>
+          <option value="mes">Mensal</option>
+          <option value="periodo">Período</option>
+        </select>
+      </div>
+
+      <div class="filtro filtro-periodo" data-periodo-campo="dia">
+        <label class="label" for="filtroDataAnalisada">Data</label>
+        <input type="date" id="filtroDataAnalisada">
+      </div>
+
+      <div class="filtro filtro-periodo hidden" data-periodo-campo="semana">
+        <label class="label" for="filtroSemanaAnalisada">Semana</label>
+        <input type="week" id="filtroSemanaAnalisada">
+      </div>
+
+      <div class="filtro filtro-periodo hidden" data-periodo-campo="mes">
+        <label class="label" for="filtroMesAnalisado">Mês</label>
+        <input type="month" id="filtroMesAnalisado">
+      </div>
+
+      <div class="filtro filtro-periodo hidden" data-periodo-campo="periodo">
+        <label class="label" for="filtroDataInicio">Data Inicial</label>
+        <input type="date" id="filtroDataInicio">
+      </div>
+
+      <div class="filtro filtro-periodo hidden" data-periodo-campo="periodo">
+        <label class="label" for="filtroDataFim">Data Final</label>
+        <input type="date" id="filtroDataFim">
+      </div>
+
+      <div class="filtro">
+        <label class="label" for="filtroTurno">Turno</label>
+        <select id="filtroTurno">
+          <option value="">TODOS</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="kpi-strip">
+      <div class="kpi-item">
+        <span class="kpi-title">Total de Eqp. Dia</span>
+        <div class="kpi-box" id="kpiTotalEqpDia"></div>
+      </div>
+      <div class="kpi-item">
+        <span class="kpi-title">Total de Eqp. Efetiva Dia</span>
+        <div class="kpi-box" id="kpiTotalEqpEfetivaDia"></div>
+      </div>
+      <div class="kpi-item">
+        <span class="kpi-title">Total de Eqp. D Dia</span>
+        <div class="kpi-box" id="kpiTotalEqpDDia"></div>
+      </div>
+      <div class="kpi-item">
+        <span class="kpi-title">% Eqp. D</span>
+        <div class="kpi-box" id="kpiPercEqpD"></div>
+      </div>
+      <div class="kpi-item">
+        <span class="kpi-title">Eqps. Jornada Não Iniciada</span>
+        <div class="kpi-box" id="kpiEqpAtivas"></div>
+      </div>
+      <div class="kpi-item">
+        <span class="kpi-title">Atraso Início Jornada</span>
+        <div class="kpi-box" id="kpiAtrasoInicio"></div>
+      </div>
+      <div class="kpi-item">
+        <span class="kpi-title">Demora 1º Atend.</span>
+        <div class="kpi-box" id="kpiDemoraAtend"></div>
+      </div>
+      <div class="kpi-item">
+        <span class="kpi-title">Desvio Ult. Atend.</span>
+        <div class="kpi-box" id="kpiDesvioUltAtend"></div>
+      </div>
+      <div class="kpi-item">
+        <span class="kpi-title">Jornada Prod. Incompleta</span>
+        <div class="kpi-box" id="kpiJornadaIncompleta"></div>
+      </div>
+    </section>
+
+    <section class="table-headline">
+      <div>
+        <span class="eyebrow">Lançamentos</span>
+        <h2>Painel Analítico</h2>
+      </div>
+      <button class="btn-exportar-imagem" id="btnExportarTabelaImagem" type="button">Exportar imagem</button>
+    </section>
+
+    <section class="table-stage">
+      <table id="tabelaRelatorio">
+        <thead>
+          <tr>
+            <th>Equipes</th>
+            <th>Início<br>Jornada</th>
+            <th>Status<br>Início</th>
+            <th>1º<br>Atend.</th>
+            <th>Status<br>1º</th>
+            <th>Início<br>Refeição</th>
+            <th>Término<br>Refeição</th>
+            <th>Status<br>Refeição</th>
+            <th>Último<br>Serv.</th>
+            <th>Status<br>Final</th>
+            <th>Jornada<br>Prod.</th>
+            <th>Status<br>Prod.</th>
+            <th>Fim<br>Jornada</th>
+            <th>Jornada</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="tbodyTabela"></tbody>
+      </table>
+    </section>
+    <nav class="table-pagination" id="tablePagination" aria-label="Paginação da tabela"></nav>
+  </main>
+
+  <div class="modal" id="modalDetalhes" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-content">
+      <button class="modal-close" id="modalClose" title="Fechar">&times;</button>
+      <h2>Detalhes da Equipe</h2>
+      <div id="modalBody">Clique numa linha para ver os detalhes aqui.</div>
+      <button id="btnDownloadModal" type="button">Baixar imagem do modal</button>
+    </div>
+  </div>
+
+</body>
+</html>

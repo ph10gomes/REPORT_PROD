@@ -1,0 +1,948 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ANDON Dashboard</title>
+  <link rel="stylesheet" href="styles1.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-title">VISÃO PCP</span>
+        <span class="brand-subtitle">Monitoramento de Produção em Tempo Real</span>
+      </div>
+      <div class="topbar-title">SUPERVISÓRIO NCSR</div>
+      <div class="header-filters">
+        <div class="header-filter-group">
+          <span class="header-filter-label">U.O</span>
+          <div class="header-filter-picker-wrapper" id="headerUoWrapper">
+            <input id="headerUoDisplay" type="text" readonly placeholder="Todas as U.O." class="header-filter-input header-filter-input-wide">
+            <button type="button" id="headerUoClear" class="header-filter-clear" aria-label="Limpar U.O">×</button>
+            <div id="headerUoPopup" class="header-filter-popup header-filter-options hidden"></div>
+          </div>
+        </div>
+        <div class="header-filter-group">
+          <span class="header-filter-label">DATA</span>
+          <div class="header-filter-picker-wrapper" id="headerDateWrapper">
+            <input id="headerDateDisplay" type="text" readonly placeholder="dd/mm/aaaa" class="header-filter-input">
+            <button type="button" id="headerDateClear" class="header-filter-clear" aria-label="Limpar data">×</button>
+            <div id="headerDatePopup" class="header-filter-popup hidden"></div>
+          </div>
+        </div>
+        <div class="header-filter-group">
+          <span class="header-filter-label">MÊS</span>
+          <div class="header-filter-picker-wrapper" id="headerMonthWrapper">
+            <input id="headerMonthDisplay" type="text" readonly placeholder="mm/aaaa" class="header-filter-input">
+            <button type="button" id="headerMonthClear" class="header-filter-clear" aria-label="Limpar mês">×</button>
+            <div id="headerMonthPopup" class="header-filter-popup hidden"></div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+
+      <section class="kpi-panel kpi-performance">
+        <div class="kpi-panel-header">PERFORMANCE</div>
+        <div class="kpi-cards">
+          <div class="grid-card andon-card-clickable" id="cardPerfTotalEquipes"><span class="card-label">TOTAL DE EQUIPES</span><div class="value" id="perfTotalEquipes">0</div></div>
+          <div class="grid-card highlight"><span class="card-label">CLASSIFICAÇÃO WM</span><div class="value" id="perfClassificacaoWm">--</div></div>
+          <div class="grid-card"><span class="card-label">CLASSIFICAÇÃO LOTE PROD.</span><div class="value" id="perfClassificacaoLote">--</div></div>
+          <div class="grid-card andon-card-clickable" id="cardPerfEquipesDWm"><span class="card-label">EQUIPES D WM</span><div class="value" id="perfEquipesDWm">0</div></div>
+          <div class="grid-card andon-card-clickable" id="cardPerfEquipesDLote"><span class="card-label">EQUIPES D LOTE PROD.</span><div class="value" id="perfEquipesDLote">0</div></div>
+          <div class="grid-card"><span class="card-label">% IMPEDIMENTO</span><div class="value" id="perfImpedimento">0,00%</div></div>
+        </div>
+      </section>
+
+      <section class="kpi-panel kpi-sdca">
+        <div class="kpi-panel-header">AÇÕES SDCA</div>
+        <div class="kpi-cards">
+          <div class="grid-card"><span class="card-label">TOTAL DE EQUIPES</span><div class="value" id="sdcaTotalEquipes">0</div></div>
+          <div class="grid-card highlight"><span class="card-label">EQUIPES D</span><div class="value" id="sdcaEquipesD">0</div></div>
+          <div class="grid-card andon-card-clickable" id="cardSdcaEquipesAcordadas"><span class="card-label">EQUIPES ACORDADAS</span><div class="value" id="sdcaEquipesAcordadas">0</div></div>
+          <div class="grid-card"><span class="card-label">% EQUIPES ACORDADAS</span><div class="value" id="sdcaPercAcordadas">0,00%</div></div>
+          <div class="grid-card andon-card-clickable" id="cardSdcaEquipesJustificadas"><span class="card-label">EQUIPES JUSTIFICADAS</span><div class="value" id="sdcaEquipesJustificadas">0</div></div>
+          <div class="grid-card"><span class="card-label">% EQUIPES JUSTIFICADAS</span><div class="value" id="sdcaPercJustificadas">0,00%</div></div>
+        </div>
+      </section>
+
+      <section class="kpi-panel kpi-jornada-prod">
+        <div class="kpi-panel-header">JORNADA PRODUTIVA</div>
+        <div class="kpi-cards">
+          <div class="grid-card"><span class="card-label">TOTAL DE EQP. EFETIVA</span><div class="value" id="journeyProdTotalEfetiva">0</div></div>
+          <div class="grid-card"><span class="card-label">MED. 1º ATEND.</span><div class="value" id="journeyProdMedPrimeiroAtend">--</div></div>
+          <div class="grid-card"><span class="card-label">MED. ULT. ATEND.</span><div class="value" id="journeyProdMedUltimoAtend">--</div></div>
+          <div class="grid-card andon-card-clickable" id="cardJourneyProdSemRefeicao"><span class="card-label">REFEIÇÃO SEM REGISTRO</span><div class="value" id="journeyProdSemRefeicao">0</div></div>
+          <div class="grid-card"><span class="card-label">MED. JORN. PROD.</span><div class="value" id="journeyProdMedJornada">--</div></div>
+          <div class="grid-card"><span class="card-label">% JORN. PROD. INCOMP</span><div class="value" id="journeyProdPercIncomp">0,00%</div></div>
+        </div>
+      </section>
+
+      <section class="kpi-panel kpi-jornada-trab">
+        <div class="kpi-panel-header">JORNADA DE TRABALHO</div>
+        <div class="kpi-cards">
+          <div class="grid-card"><span class="card-label">TOTAL DE EQUIP. EFETIVA</span><div class="value">40</div></div>
+          <div class="grid-card"><span class="card-label">ATRASO</span><div class="value">8</div></div>
+          <div class="grid-card"><span class="card-label">SAÍDA ANTECIPADA</span><div class="value">5</div></div>
+          <div class="grid-card"><span class="card-label">ABSENTEÍSMO</span><div class="value">0</div></div>
+          <div class="grid-card"><span class="card-label">HORA EXTRA</span><div class="value">35</div></div>
+        </div>
+      </section>
+
+      <section class="kpi-panel kpi-eficiencia">
+        <div class="kpi-panel-header">EFICIÊNCIA</div>
+        <div class="kpi-cards">
+          <div class="grid-card"><span class="card-label">TOTAL DE EQUIP. EFETIVA</span><div class="value">40</div></div>
+          <div class="grid-card"><span class="card-label">SERVIÇOS DESIG.</span><div class="value">35</div></div>
+          <div class="grid-card"><span class="card-label">SERVIÇOS EXEC.</span><div class="value">0</div></div>
+          <div class="grid-card"><span class="card-label">SERVIÇOS PRODUTIVO</span><div class="value">28</div></div>
+          <div class="grid-card"><span class="card-label">SERVIÇOS IMPRODUTIVOS</span><div class="value">7</div></div>
+          <div class="grid-card"><span class="card-label">% SERV. IMPROD.</span><div class="value">20%</div></div>
+          <div class="grid-card"><span class="card-label">MED. SERVIÇO POR EQP.</span><div class="value">--</div></div>
+          <div class="grid-card"><span class="card-label">EQUIPE SEM SERVIÇO</span><div class="value">--</div></div>
+        </div>
+      </section>
+
+    </main>
+
+    <section class="supervisor-view hidden">
+      <div class="supervisor-header">
+        <div class="supervisor-header-title">
+          <h2>Visão de Supervisores</h2>
+          <button id="backButton" class="secondary-button">Voltar ao Dashboard</button>
+        </div>
+        <div class="supervisor-filters">
+          <label class="uo-label">
+            U.O.
+            <input type="hidden" id="uoFilter" value="">
+            <div class="uo-wrapper">
+              <button type="button" class="uo-summary">
+                <span id="uoSelected">Todas as U.O.</span>
+                <svg class="dropdown-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </button>
+              <div id="uoOptionsContainer" class="uo-options-container collapsed"></div>
+            </div>
+          </label>
+          <label class="supervisor-label">
+            Supervisor
+            <div class="supervisor-wrapper">
+              <div class="supervisor-summary">
+                <span id="supervisorCount">0 supervisores selecionados</span>
+                <svg class="dropdown-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <div id="supervisorCheckboxContainer" class="supervisor-checkbox-container collapsed">
+                <!-- Checkboxes serão adicionados dinamicamente via JS -->
+              </div>
+            </div>
+          </label>
+          <label class="date-label">
+            Data
+            <div class="header-filter-picker-wrapper" id="supDateWrapper">
+              <input id="supDateDisplay" type="text" readonly placeholder="dd/mm/aaaa" class="header-filter-input">
+              <button type="button" id="supDateClear" class="header-filter-clear" aria-label="Limpar data">×</button>
+              <div id="supDatePopup" class="header-filter-popup hidden"></div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="supervisor-content">
+        <div class="supervisor-list">
+          <div class="supervisor-card" data-uo="U.O. 1" data-supervisor="Cleydivan Nascimento Silva" data-date="2026-04-10">
+            <div class="supervisor-card-title">Cleydivan Nascimento Silva</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 1" data-supervisor="Luiz Lan Aparecido de Souza Pinto" data-date="2026-04-10">
+            <div class="supervisor-card-title">Luiz Lan Aparecido de Souza Pinto</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 2" data-supervisor="Marconi Cesar Teixeira Junior" data-date="2026-04-10">
+            <div class="supervisor-card-title">Marconi Cesar Teixeira Junior</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 2" data-supervisor="Marcos Giovane Oliveira Pinheiro" data-date="2026-04-10">
+            <div class="supervisor-card-title">Marcos Giovane Oliveira Pinheiro</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 3" data-supervisor="Renan Silva Santos Machado" data-date="2026-04-10">
+            <div class="supervisor-card-title">Renan Silva Santos Machado</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 3" data-supervisor="Washington Lemes do Nascimento" data-date="2026-04-10">
+            <div class="supervisor-card-title">Washington Lemes do Nascimento</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 284" data-supervisor="Cleydivan Nascimento Silva" data-date="2026-04-10">
+            <div class="supervisor-card-title">Cleydivan Nascimento Silva</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 284" data-supervisor="Luiz Lan Aparecido de Souza Pinto" data-date="2026-04-10">
+            <div class="supervisor-card-title">Luiz Lan Aparecido de Souza Pinto</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 284" data-supervisor="Marconi Cesar Teixeira Junior" data-date="2026-04-10">
+            <div class="supervisor-card-title">Marconi Cesar Teixeira Junior</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 284" data-supervisor="Marcos Giovane Oliveira Pinheiro" data-date="2026-04-10">
+            <div class="supervisor-card-title">Marcos Giovane Oliveira Pinheiro</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 284" data-supervisor="Ralf da Silva" data-date="2026-04-10">
+            <div class="supervisor-card-title">Ralf da Silva</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 284" data-supervisor="Renan Silva Santos Machado" data-date="2026-04-10">
+            <div class="supervisor-card-title">Renan Silva Santos Machado</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 284" data-supervisor="Washington Lemes do Nascimento" data-date="2026-04-10">
+            <div class="supervisor-card-title">Washington Lemes do Nascimento</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 286" data-supervisor="Cintia Demaria Alves" data-date="2026-04-10">
+            <div class="supervisor-card-title">Cintia Demaria Alves</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 286" data-supervisor="Gilberto Rodrigo Silva Paulo" data-date="2026-04-10">
+            <div class="supervisor-card-title">Gilberto Rodrigo Silva Paulo</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="supervisor-card" data-uo="U.O. 286" data-supervisor="Otavio Barbosa de Souza" data-date="2026-04-10">
+            <div class="supervisor-card-title">Otavio Barbosa de Souza</div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Performance</div>
+              <div class="supervisor-metrics supervisor-metrics-4">
+                <div class="metric">TOTAL DE EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">CLASSIFICAÇÃO WM<div class="metric-value">D-45%</div></div>
+                <div class="metric">CLASSIFICAÇÃO LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">EQUIPES D WM<div class="metric-value">23</div></div>
+                <div class="metric">EQUIPES D LOTE PROD.<div class="metric-value">--</div></div>
+                <div class="metric">% IMPEDIMENTO<div class="metric-value">32%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Ações SDCA</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQUIPES<div class="metric-value">40</div></div>
+                <div class="metric">EQUIPES D<div class="metric-value">23</div></div>
+                <div class="metric">ACORDADAS<div class="metric-value">15</div></div>
+                <div class="metric">JUSTIFICADAS<div class="metric-value">8</div></div>
+                <div class="metric">% JUSTIFICADAS<div class="metric-value">35%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada Produtiva</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">MED. 1º ATEND.<div class="metric-value">18</div></div>
+                <div class="metric">MED. ULT. ATEND.<div class="metric-value">15</div></div>
+                <div class="metric">REF SEM REG.<div class="metric-value">23</div></div>
+                <div class="metric">MED. JORN. PROD.<div class="metric-value">80%</div></div>
+              </div>
+            </div>
+            <div class="supervisor-card-section">
+              <div class="section-label">Jornada de Trabalho</div>
+              <div class="supervisor-metrics supervisor-metrics-5">
+                <div class="metric">TOTAL EQP EFETIVA<div class="metric-value">40</div></div>
+                <div class="metric">ATRASO<div class="metric-value">8</div></div>
+                <div class="metric">SAÍDA<div class="metric-value">5</div></div>
+                <div class="metric">ABSENTEÍSMO<div class="metric-value">0</div></div>
+                <div class="metric">HORA EXTRA<div class="metric-value">12</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="custom-footer">
+      <div class="footer-top">
+        <div class="footer-logo-left">
+          <img src="img/logo.NCSR.jpg" alt="Logo NCSR" class="footer-logo-ncsr">
+        </div>
+        <div class="footer-center">
+          <p class="footer-motto">Nosso Compromisso está com a Entrega, Segurança e Redução do CHI</p>
+          <h2 class="footer-brand">NCSR ENERGIA</h2>
+        </div>
+        <div class="footer-logo-right">
+          <img src="img/logo.PCP.jpg" alt="Logo PCP Sistemas" class="footer-logo-pcp">
+        </div>
+      </div>
+      <hr class="footer-divider">
+      <div class="footer-bottom">
+        <p>2026 | Gerência NCSR | All rights reserved.</p>
+      </div>
+    </footer>
+
+    <footer class="footer">
+      <nav class="footer-nav">
+        <a href="#" class="footer-link">Agendar Reunião</a>
+        <a href="#" class="footer-link">Calendário de Reuniões</a>
+        <a href="#" class="footer-link">Participantes</a>
+        <a href="#" class="footer-link">Minhas Atividades</a>
+        <a href="#" class="footer-link">Histórico</a>
+        <a href="#" id="supervisorButton" class="footer-link footer-link-supervisor">Supervisor</a>
+      </nav>
+    </footer>
+  </div>
+
+  <div id="equipesModal" class="andon-modal hidden">
+    <div class="andon-modal-dialog">
+      <div class="andon-modal-header">
+        <div>
+          <h3 id="equipesModalTitle">Equipes</h3>
+          <p id="equipesModalMeta" class="andon-modal-meta"></p>
+        </div>
+        <button type="button" id="equipesModalClose" class="andon-modal-close" aria-label="Fechar">×</button>
+      </div>
+      <div class="andon-modal-body">
+        <div class="andon-modal-table-wrap">
+          <table class="andon-modal-table">
+            <thead>
+              <tr>
+                <th>Equipe</th>
+                <th>Meta</th>
+                <th>Produção</th>
+                <th>Faixa Dia</th>
+                <th>% PROD.DIA</th>
+                <th>Início Jornada</th>
+                <th>Início Refeição</th>
+                <th>Término Refeição</th>
+                <th>1º Atendimento</th>
+                <th>Últ. Atendimento</th>
+                <th>Fim Jornada</th>
+                <th>Jornada Produtiva</th>
+              </tr>
+            </thead>
+            <tbody id="equipesModalBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script1.js"></script>
+</body>
+</html>

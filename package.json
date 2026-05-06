@@ -1,0 +1,21 @@
+{
+  "name": "report-prod-mysql",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Painel (frontend) + API Node para ler dados de uma tabela MySQL existente.",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "mysql:test": "node server/test-connection.js",
+    "mysql:test-acordos": "node server/test-acordos-justificativas.js",
+    "mysql:import-acordos": "node server/import-acordos-backup.js",
+    "docs:pdf": "node tools/generate-functionalidades-pdf.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "mysql2": "^3.14.1",
+    "pdfkit": "^0.15.0"
+  }
+}
