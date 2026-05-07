@@ -290,6 +290,9 @@ const cacheCodxObsEquipe = new Map();
 const cacheLinhasContextoModal = new Map();
 const cacheControleServico = new Map();
 const cacheControleServicoResumo = new Map();
+const cacheLinhasDataUo = new Map();
+const cacheUltimaFaixa = new Map();
+const cacheCodigosTurno = new Map();
 
 window.addEventListener("message", (event) => {
     if (!iframeReportJornada || event.source !== iframeReportJornada.contentWindow) return;
@@ -317,6 +320,7 @@ let acordosStateSavePromise = Promise.resolve();
 let acordosHistorySavePromise = Promise.resolve();
 let currentTabelaGeralResumo = null;
 let currentTabelaGeralSupervisorSelecionado = "";
+let tabelaGeralOrdenacao = { coluna: null, direcao: "asc" };
 
 const VALOR_RS_POR_UNIDADE = 2300;
 const XLSX_CDN_URL = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
@@ -553,6 +557,14 @@ function limparCachesModal() {
     cacheLinhaBaseEquipe.clear();
     cacheCodxEquipe.clear();
     cacheLinhasContextoModal.clear();
+}
+
+function limparCachesDadosPainel() {
+    limparCachesModal();
+    cacheLinhasDataUo.clear();
+    cacheUltimaFaixa.clear();
+    cacheCodigosTurno.clear();
+    cacheFaixas = {};
 }
 
 /* ================= JUSTIFICATIVAS (PRESETS) ================= */
@@ -975,21 +987,31 @@ function renderizarOpcoesDescricaoJustificativa(presets, gruposSelecionados = []
 }
 
 function obterLinhasContextoModal(data, uo) {
-    const dataCtx = String(data || "");
-    const uoCtx = String(uo || "");
-    const cacheKey = ["linhasContexto", dataCtx, uoCtx].join("|");
+    return obterLinhasPorDataUo(data, uo);
+}
 
-    if (cacheLinhasContextoModal.has(cacheKey)) {
-        return cacheLinhasContextoModal.get(cacheKey);
+function obterUoLinha(linha) {
+    return String(
+        obterValorColuna(linha, ["Cód.UO", "CÃ³d.UO", "CÃƒÂ³d.UO", "COD_UO", "UO"]) || ""
+    ).trim();
+}
+
+function obterLinhasPorDataUo(data, uo = "") {
+    const dataCtx = String(data || "").trim();
+    const uoCtx = String(uo || "").trim();
+    const cacheKey = ["linhasDataUo", dataCtx || "*", uoCtx || "*"].join("|");
+
+    if (cacheLinhasDataUo.has(cacheKey)) {
+        return cacheLinhasDataUo.get(cacheKey);
     }
 
-    const linhas = (dados || []).filter(l => {
-        if (dataCtx && normalizarDataExcel(l["Data"]) !== dataCtx) return false;
-        if (uoCtx && String(l["Cód.UO"] || "") !== uoCtx) return false;
+    const linhas = (dados || []).filter(linha => {
+        if (dataCtx && normalizarDataExcel(linha["Data"]) !== dataCtx) return false;
+        if (uoCtx && obterUoLinha(linha) !== uoCtx) return false;
         return true;
     });
 
-    cacheLinhasContextoModal.set(cacheKey, linhas);
+    cacheLinhasDataUo.set(cacheKey, linhas);
     return linhas;
 }
 
@@ -1085,10 +1107,11 @@ function calcularPrevisaoTabelaGeral(prod, horaAtual) {
     }
 
     const horasAtual = obterHorasAcumuladas(horaAtual);
-    const horasFechamento = obterHorasAcumuladas("17");
+    const ultimaHoraDia = normalizarHora(window.__ultimaHoraTabelaGeralDia || "17") || "17";
+    const horasFechamento = Math.max(obterHorasAcumuladas("17"), obterHorasAcumuladas(ultimaHoraDia));
     if (!horasAtual || horasAtual >= horasFechamento) {
         // No fechamento, a previsao vira o realizado acumulado; antes disso,
-        // ela acompanha a producao real do momento projetada ate 17h.
+        // ela acompanha a producao real do momento projetada ate a ultima hora do dia.
         return p;
     }
 
@@ -1485,8 +1508,40 @@ function modoPeriodoAtivo() {
     return !(modoTabela === "diario" || modoTabela === "geral" || modoTabela === "total-horas");
 }
 
+function obterHorasTurnoSelecionado() {
+    if (turnoTardeAtivo()) return FAIXAS_TARDE;
+    if (turnoMadrugadaAtivo()) return FAIXAS_MADRUGADA;
+    return null;
+}
+
 function obterListaHorasPorModo(modo = modoTabela) {
-    return modo === "total-horas" ? HORAS_TOTAIS : FAIXAS;
+    if (modo === "total-horas") return HORAS_TOTAIS;
+
+    const horasTurno = obterHorasTurnoSelecionado();
+    if ((modo === "diario" || modo === "geral") && horasTurno) return horasTurno;
+
+    return FAIXAS;
+}
+
+function obterHorasBancoDia(uo, data) {
+    return [...new Set(
+        obterLinhasPorDataUo(data, uo)
+            .map(linha => normalizarHora(
+                linha?.hora_atualizacao ??
+                linha?.["hora_atualizacao"] ??
+                linha?.HoraRaw ??
+                linha?.["HoraRaw"] ??
+                linha?.["Hora"]
+            ))
+            .filter(Boolean)
+    )].sort((a, b) => Number(a) - Number(b));
+}
+
+function obterListaHorasTabelaGeral(uo, data) {
+    const horasTurno = obterHorasTurnoSelecionado();
+    if (horasTurno) return horasTurno;
+    const horasBanco = obterHorasBancoDia(uo, data);
+    return horasBanco.length ? horasBanco : FAIXAS;
 }
 
 function obterModoPorPeriodoTopo(valor) {
@@ -1504,6 +1559,18 @@ function obterPeriodoTopoPorModo(modo) {
     return "diario";
 }
 
+function obterPeriodoFiltroAtual() {
+    return String(periodoTabelaSelect?.value || "diario").trim() || "diario";
+}
+
+function periodoFiltroAtivo() {
+    return obterPeriodoFiltroAtual() !== "diario";
+}
+
+function telaAceitaFiltroPeriodo() {
+    return modoTabela === "diario" || modoTabela === "geral";
+}
+
 function obterHorasVisiveisTabela(horaReferencia, modo = modoTabela) {
     const horasBase = obterListaHorasPorModo(modo);
     const raw = String(horaReferencia || "").trim().toUpperCase();
@@ -1518,7 +1585,9 @@ function atualizarOpcoesHora() {
     if (!horaSelect) return;
 
     const valorAtual = String(horaSelect.value || "").trim().toUpperCase();
-    const horas = obterListaHorasPorModo(modoTabela);
+    const horas = modoTabela === "geral"
+        ? obterListaHorasTabelaGeral(uoSelect?.value || "", dataSelect?.value || obterHojeISO())
+        : obterListaHorasPorModo(modoTabela);
     const totalLabel = modoTabela === "total-horas" ? "Tabela total (01-23)" : "Tabela total";
 
     horaSelect.innerHTML =
@@ -1547,7 +1616,9 @@ function montarParametrosDadosPainel({ forcarTotalHoras = false } = {}) {
 
     if (uo) qs.set("uo", uo);
 
-    if (modoTabela === "semanal") {
+    const periodoFiltro = telaAceitaFiltroPeriodo() ? obterPeriodoFiltroAtual() : "";
+
+    if (modoTabela === "semanal" || periodoFiltro === "semanal") {
         const semana = String(semanaSelect?.value || "").trim();
         const intervalo = semana ? obterInicioEFimSemanaPorInput(semana) : null;
         if (intervalo?.inicio && intervalo?.fim) {
@@ -1557,7 +1628,7 @@ function montarParametrosDadosPainel({ forcarTotalHoras = false } = {}) {
         }
     }
 
-    if (modoTabela === "mensal" || modoTabela === "quinzena1" || modoTabela === "quinzena2") {
+    if (modoTabela === "mensal" || modoTabela === "quinzena1" || modoTabela === "quinzena2" || periodoFiltro === "mensal") {
         const anoMes = String(mesSelect?.value || obterAnoMesAtual()).trim();
         if (anoMes) {
             const [ano, mes] = anoMes.split("-").map(Number);
@@ -1578,7 +1649,7 @@ function montarParametrosDadosPainel({ forcarTotalHoras = false } = {}) {
         }
     }
 
-    if (modoTabela === "periodo") {
+    if (modoTabela === "periodo" || periodoFiltro === "periodo") {
         const inicio = String(periodoInicioSelect?.value || "").trim();
         const fim = String(periodoFimSelect?.value || inicio).trim();
         if (inicio && fim) {
@@ -1612,7 +1683,7 @@ async function carregarDadosPainelAtual({ forcar = false, forcarTotalHoras = fal
         dados = normalizarColecaoPainel(payload?.rows || []);
         dadosBase = Array.isArray(dados) ? dados.slice() : [];
         chaveDadosCarregados = chave;
-        limparCachesModal();
+        limparCachesDadosPainel();
 
         if (modoTabela === "semanal") {
             popularSemanasDisponiveis();
@@ -1642,8 +1713,8 @@ function obterHorasAcumuladas(hora) {
 function obterHoraLinha(linha) {
     if (!linha) return "";
 
-    // Na "Tabela Total", usa o valor bruto (hora_atualizacao) para permitir 01–23.
-    if (modoTabela === "total-horas") {
+    // Na "Tabela Total" e nos turnos especiais, usa a hora bruta para permitir faixas fora de 09/11/13/15/17.
+    if (modoTabela === "total-horas" || modoTabela === "geral" || turnoTardeAtivo() || turnoMadrugadaAtivo()) {
         return normalizarHora(linha.hora_atualizacao ?? linha["hora_atualizacao"] ?? linha.HoraRaw ?? linha["HoraRaw"] ?? linha["Hora"]);
     }
 
@@ -1701,25 +1772,154 @@ function montarCabecalho(tipo, incluirPeriodo = false, horasVisiveis = FAIXAS) {
 }
 
 function montarCabecalhoGeral(tipo) {
-    theadRow.innerHTML = `
-        <th>${tipo}</th>
-        <th>Meta Dia</th>
-        <th>Produção</th>
-        <th>Faixa Dia</th>
-        <th>% PROD.DIA</th>
-        <th>Previsão Dia</th>
-        <th>Prev. % Meta</th>
-        <th>Prev. Faixa</th>
-        <th>Total Eq.</th>
-        <th>Med. Serv. Design.</th>
-        <th>Med. Serv.</th>
-        <th>Med. Produt.</th>
-        <th>Med. Improd.</th>
-        <th>Med. Início Jornada</th>
-        <th>Med. 1º Atend.</th>
-        <th>Med. Ult. Atend.</th>
-        <th>Med. Jornada Prod.</th>
-    `;
+    const colunas = [
+        tipo,
+        "Meta Dia",
+        "Produção",
+        "Faixa Dia",
+        "% PROD.DIA",
+        "Previsão Dia",
+        "Prev. % Meta",
+        "Prev. Faixa",
+        "Total Eq.",
+        "Med. Serv. Design.",
+        "Med. Serv.",
+        "Med. Produt.",
+        "Med. Improd.",
+        "Med. Início Jornada",
+        "Med. 1º Atend.",
+        "Med. Ult. Atend.",
+        "Med. Jornada Prod."
+    ];
+
+    theadRow.innerHTML = colunas.map((label, index) => `
+        <th class="sortable-th" data-sort-col="${index}" title="Clique para ordenar">
+            <span class="th-label">${label}</span>
+            <span class="sort-indicator" aria-hidden="true">↕</span>
+        </th>
+    `).join("");
+
+    ativarOrdenacaoTabelaGeral();
+}
+
+function ativarOrdenacaoTabelaGeral() {
+    document.querySelectorAll("#theadRow th[data-sort-col]").forEach(th => {
+        if (th.dataset.sortBound === "1") return;
+        th.dataset.sortBound = "1";
+        th.addEventListener("click", (event) => {
+            if (event.target.closest(".filtro-icon, .filtro-box")) return;
+            ordenarTabelaGeralPorColuna(Number(th.dataset.sortCol || 0));
+        });
+    });
+    atualizarIndicadoresOrdenacaoTabelaGeral();
+}
+
+function obterTipoOrdenacaoTabelaGeral(valor) {
+    const texto = String(valor || "").trim();
+    if (!texto || texto === "-") return { tipo: "vazio", valor: null };
+
+    const faixa = texto.toUpperCase();
+    const ordemFaixa = { D: 1, C: 2, B: 3, A: 4, AA: 5 };
+    if (Object.prototype.hasOwnProperty.call(ordemFaixa, faixa)) {
+        return { tipo: "numero", valor: ordemFaixa[faixa] };
+    }
+
+    const hora = texto.match(/^(\d{1,2}):(\d{2})$/);
+    if (hora) {
+        return { tipo: "numero", valor: (Number(hora[1]) * 60) + Number(hora[2]) };
+    }
+
+    const numero = Number(
+        texto
+            .replace(/\s/g, "")
+            .replace(/%$/, "")
+            .replace(/\./g, "")
+            .replace(",", ".")
+    );
+    if (Number.isFinite(numero) && /\d/.test(texto)) {
+        return { tipo: "numero", valor: numero };
+    }
+
+    return {
+        tipo: "texto",
+        valor: texto
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toUpperCase()
+    };
+}
+
+function compararValoresTabelaGeral(a, b, direcao = "asc") {
+    const av = obterTipoOrdenacaoTabelaGeral(a);
+    const bv = obterTipoOrdenacaoTabelaGeral(b);
+
+    if (av.tipo === "vazio" && bv.tipo !== "vazio") return 1;
+    if (bv.tipo === "vazio" && av.tipo !== "vazio") return -1;
+    if (av.tipo === "vazio" && bv.tipo === "vazio") return 0;
+
+    let resultado = 0;
+    if (av.tipo === "numero" && bv.tipo === "numero") {
+        resultado = av.valor - bv.valor;
+    } else {
+        resultado = String(av.valor).localeCompare(String(bv.valor), "pt-BR", {
+            numeric: true,
+            sensitivity: "base"
+        });
+    }
+
+    return direcao === "asc" ? resultado : -resultado;
+}
+
+function atualizarIndicadoresOrdenacaoTabelaGeral() {
+    document.querySelectorAll("#theadRow th[data-sort-col]").forEach(th => {
+        const icon = th.querySelector(".sort-indicator");
+        const col = Number(th.dataset.sortCol || 0);
+        th.classList.toggle("sort-active", tabelaGeralOrdenacao.coluna === col);
+        if (icon) {
+            icon.textContent = tabelaGeralOrdenacao.coluna === col
+                ? (tabelaGeralOrdenacao.direcao === "asc" ? "↑" : "↓")
+                : "↕";
+        }
+    });
+}
+
+function aplicarOrdenacaoTabelaGeralDom() {
+    if (!tbody || tabelaGeralOrdenacao.coluna == null) return;
+
+    const linhas = Array.from(tbody.querySelectorAll("tr"));
+    const total = linhas.find(linha => linha.classList.contains("resultado"));
+    const dadosOrdenaveis = linhas.filter(linha => !linha.classList.contains("resultado"));
+    const coluna = Number(tabelaGeralOrdenacao.coluna);
+    const direcao = tabelaGeralOrdenacao.direcao;
+
+    dadosOrdenaveis.sort((a, b) => {
+        const textoA = a.children[coluna]?.innerText || "";
+        const textoB = b.children[coluna]?.innerText || "";
+        const cmp = compararValoresTabelaGeral(textoA, textoB, direcao);
+        if (cmp !== 0) return cmp;
+        return String(a.children[0]?.innerText || "").localeCompare(
+            String(b.children[0]?.innerText || ""),
+            "pt-BR",
+            { sensitivity: "base" }
+        );
+    });
+
+    dadosOrdenaveis.forEach(linha => tbody.appendChild(linha));
+    if (total) tbody.appendChild(total);
+    atualizarIndicadoresOrdenacaoTabelaGeral();
+}
+
+function ordenarTabelaGeralPorColuna(coluna) {
+    if (tabelaGeralOrdenacao.coluna === coluna) {
+        tabelaGeralOrdenacao.direcao = tabelaGeralOrdenacao.direcao === "asc" ? "desc" : "asc";
+    } else {
+        tabelaGeralOrdenacao.coluna = coluna;
+        const textoAmostra = tbody?.querySelector(`tr:not(.resultado) td:nth-child(${coluna + 1})`)?.innerText || "";
+        tabelaGeralOrdenacao.direcao = obterTipoOrdenacaoTabelaGeral(textoAmostra).tipo === "texto" ? "asc" : "desc";
+    }
+
+    aplicarOrdenacaoTabelaGeralDom();
+    aplicarFiltrosCombinados();
 }
 
 function mediaNumerica(valores = []) {
@@ -2019,15 +2219,17 @@ function setModo(modo, reaplicar = true) {
     }
 
     const modoDiarioAtivo = modo === "diario" || modo === "geral" || modo === "total-horas";
-    if (grupoData) grupoData.classList.toggle("hidden", modoPainelExternoAtivo || !modoDiarioAtivo);
-    if (grupoHora) grupoHora.classList.toggle("hidden", modoPainelExternoAtivo || !modoDiarioAtivo);
-    if (grupoSemana) grupoSemana.classList.toggle("hidden", modoPainelExternoAtivo || modo !== "semanal");
+    const periodoFiltro = telaAceitaFiltroPeriodo() ? obterPeriodoFiltroAtual() : obterPeriodoTopoPorModo(modo);
+    const usandoPeriodoFiltro = telaAceitaFiltroPeriodo() && periodoFiltro !== "diario";
+    if (grupoData) grupoData.classList.toggle("hidden", modoPainelExternoAtivo || !modoDiarioAtivo || usandoPeriodoFiltro);
+    if (grupoHora) grupoHora.classList.toggle("hidden", modoPainelExternoAtivo || !modoDiarioAtivo || usandoPeriodoFiltro);
+    if (grupoSemana) grupoSemana.classList.toggle("hidden", modoPainelExternoAtivo || !(modo === "semanal" || periodoFiltro === "semanal"));
     if (grupoMes) grupoMes.classList.toggle(
         "hidden",
-        modoPainelExternoAtivo || !(modo === "mensal" || modo === "quinzena1" || modo === "quinzena2")
+        modoPainelExternoAtivo || !(modo === "mensal" || modo === "quinzena1" || modo === "quinzena2" || periodoFiltro === "mensal")
     );
-    if (grupoPeriodoInicio) grupoPeriodoInicio.classList.toggle("hidden", modoPainelExternoAtivo || modo !== "periodo");
-    if (grupoPeriodoFim) grupoPeriodoFim.classList.toggle("hidden", modoPainelExternoAtivo || modo !== "periodo");
+    if (grupoPeriodoInicio) grupoPeriodoInicio.classList.toggle("hidden", modoPainelExternoAtivo || !(modo === "periodo" || periodoFiltro === "periodo"));
+    if (grupoPeriodoFim) grupoPeriodoFim.classList.toggle("hidden", modoPainelExternoAtivo || !(modo === "periodo" || periodoFiltro === "periodo"));
 
     if (modoPainelExternoAtivo) return;
 
@@ -2045,15 +2247,15 @@ function setModo(modo, reaplicar = true) {
         dataSelect.value = obterHojeISO();
     }
 
-    if (modo === "semanal") {
+    if (modo === "semanal" || periodoFiltro === "semanal") {
         popularSemanasDisponiveis();
     }
 
-    if ((modo === "mensal" || modo === "quinzena1" || modo === "quinzena2") && mesSelect && !mesSelect.value) {
+    if ((modo === "mensal" || modo === "quinzena1" || modo === "quinzena2" || periodoFiltro === "mensal") && mesSelect && !mesSelect.value) {
         mesSelect.value = obterAnoMesAtual();
     }
 
-    if (modo === "periodo") {
+    if (modo === "periodo" || periodoFiltro === "periodo") {
         const hoje = obterHojeISO();
         if (periodoInicioSelect && !periodoInicioSelect.value) periodoInicioSelect.value = dataSelect?.value || hoje;
         if (periodoFimSelect && !periodoFimSelect.value) periodoFimSelect.value = periodoInicioSelect?.value || hoje;
@@ -2212,18 +2414,22 @@ function popularSemanasDisponiveis() {
 /* ================= ÚLTIMA FAIXA ================= */
 
 function ultimaFaixaDisponivel(uo, data) {
+    const cacheKey = ["ultimaFaixa", String(data || ""), String(uo || ""), modoTabela, turnoSelect?.value || ""].join("|");
+    if (cacheUltimaFaixa.has(cacheKey)) return cacheUltimaFaixa.get(cacheKey);
+
     const horas = new Set();
 
-    dados.forEach(l => {
-        if (normalizarDataExcel(l["Data"]) !== data) return;
-        if (uo && String(l["Cód.UO"]) !== String(uo)) return;
-
+    obterLinhasPorDataUo(data, uo).forEach(l => {
         const hora = obterHoraLinhaModalEquipes(l);
         if (hora) horas.add(hora);
     });
 
-    const lista = modoTabela === "total-horas" ? HORAS_TOTAIS : FAIXAS;
-    return lista.filter(f => horas.has(f)).pop();
+    const lista = modoTabela === "geral"
+        ? obterListaHorasTabelaGeral(uo, data)
+        : obterListaHorasPorModo(modoTabela);
+    const resultado = lista.filter(f => horas.has(f)).pop();
+    cacheUltimaFaixa.set(cacheKey, resultado);
+    return resultado;
 }
 
 /* ================= CALCULAR FAIXAS ================= */
@@ -2237,10 +2443,7 @@ function calcularFaixas(campo, uo, data, horasLista = null) {
         cacheFaixas[faixa] = {};
     });
 
-    dados.forEach(l => {
-        if (normalizarDataExcel(l["Data"]) !== data) return;
-        if (uo && String(l["Cód.UO"]) !== String(uo)) return;
-
+    obterLinhasPorDataUo(data, uo).forEach(l => {
         const faixa = obterHoraLinha(l);
         if (!horasSet.has(faixa)) return;
 
@@ -2281,9 +2484,8 @@ function calcularFaixas(campo, uo, data, horasLista = null) {
 
 function obterDatasDoMes(uo, anoMes) {
     return [...new Set(
-        dados
+        obterLinhasPorDataUo("", uo)
             .filter(l => {
-                if (uo && String(l["Cód.UO"]) !== String(uo)) return false;
                 return extrairAnoMes(l["Data"]) === anoMes;
             })
             .map(l => normalizarDataExcel(l["Data"]))
@@ -2295,11 +2497,10 @@ function obterDatasDaSemanaSelecionada(uo, semanaStr) {
     const { inicio, fim } = obterInicioEFimSemanaPorInput(semanaStr);
 
     return [...new Set(
-        dados
+        obterLinhasPorDataUo("", uo)
             .filter(l => {
                 const data = normalizarDataExcel(l["Data"]);
                 if (!data) return false;
-                if (uo && String(l["Cód.UO"]) !== String(uo)) return false;
                 return data >= inicio && data <= fim;
             })
             .map(l => normalizarDataExcel(l["Data"]))
@@ -2327,10 +2528,7 @@ function resumirPeriodo(datasPeriodo, campo, uo) {
         const mapaDia = {};
         const eqTotDia = { AA: 0, A: 0, B: 0, C: 0, D: 0 };
 
-        dados.forEach(l => {
-            if (normalizarDataExcel(l["Data"]) !== data) return;
-            if (uo && String(l["Cód.UO"]) !== String(uo)) return;
-
+        obterLinhasPorDataUo(data, uo).forEach(l => {
             const hora = normalizarHora(l["Hora"]);
             if (!FAIXAS.includes(hora)) return;
             const codigoEquipe = obterCodigoEquipeLinha(l);
@@ -4261,12 +4459,11 @@ function obterInicioJornadaLinha(linha) {
 function obterCodigosTurnoSelecionado(data, uo) {
     const turno = String(turnoSelect?.value || "").trim().toUpperCase();
     if (!turno) return null;
+    const cacheKey = ["codigosTurno", String(data || ""), String(uo || ""), turno].join("|");
+    if (cacheCodigosTurno.has(cacheKey)) return cacheCodigosTurno.get(cacheKey);
 
     const codigos = new Set();
-    (dados || []).forEach(linha => {
-        if (data && normalizarDataExcel(linha["Data"]) !== data) return;
-        if (uo && String(obterValorColuna(linha, ["Cód.UO", "CÃ³d.UO", "CÃƒÂ³d.UO", "COD_UO", "UO"]) || "") !== String(uo)) return;
-
+    obterLinhasPorDataUo(data, uo).forEach(linha => {
         const codigo = obterCodigoEquipeLinha(linha);
         if (!codigo) return;
 
@@ -4275,6 +4472,7 @@ function obterCodigosTurnoSelecionado(data, uo) {
         }
     });
 
+    cacheCodigosTurno.set(cacheKey, codigos);
     return codigos;
 }
 
@@ -4924,12 +5122,7 @@ function obterDetalheFaixaPorHora(codigoEquipe, hora) {
     const producaoAcumuladaPorHora = {};
     const metaAcumuladaPorHora = {};
 
-    dados.forEach(l => {
-        if (normalizarDataExcel(obterValorColunaPorFragmentos(l, ["DATA"])) !== currentModalContext.data) return;
-
-        const uoLinha = obterValorColunaPorFragmentos(l, ["COD", "UO"]);
-        if (currentModalContext.uo && String(uoLinha) !== String(currentModalContext.uo)) return;
-
+    obterLinhasPorDataUo(currentModalContext.data, currentModalContext.uo).forEach(l => {
         const codigoLinha = String(obterValorColunaPorFragmentos(l, ["COD", "EQUIPE"]) || "").trim();
         if (codigoLinha !== String(codigoEquipe)) return;
 
@@ -5318,7 +5511,7 @@ async function carregarExcel() {
 
     popularSemanasDisponiveis();
     dadosBase = Array.isArray(dados) ? dados.slice() : [];
-    limparCachesModal();
+    limparCachesDadosPainel();
     aplicar();
     carregarStatusDados();
 }
@@ -5349,16 +5542,26 @@ function restaurarDadosBase() {
 /* ================= APLICAR ================= */
 
 async function aplicar() {
-    limparCachesModal();
     const tipo = tipoSelect.value;
     campoGlobal = obterCampoPorTipo(tipo);
 
     if (modoTabela === "diario") {
+        if (periodoFiltroAtivo()) {
+            const periodo = obterPeriodoFiltroAtual();
+            if (periodo === "semanal") aplicarSemanal();
+            if (periodo === "mensal") aplicarMensal();
+            if (periodo === "periodo") aplicarPeriodoPersonalizado();
+            return;
+        }
         aplicarDiario();
         return;
     }
 
     if (modoTabela === "geral") {
+        if (periodoFiltroAtivo()) {
+            await aplicarTabelaGeralPeriodo();
+            return;
+        }
         await aplicarTabelaGeral();
         return;
     }
@@ -5409,7 +5612,7 @@ function aplicarDiario() {
     }
 
     const modoTotalHoras = modoTabela === "total-horas";
-    const horasFonte = modoTotalHoras ? HORAS_TOTAIS : FAIXAS;
+    const horasFonte = obterListaHorasPorModo(modoTabela);
     calcularFaixas(campo, uo, data, horasFonte);
     const codigosTurnoSelecionado = obterCodigosTurnoSelecionado(data, uo);
 
@@ -5435,9 +5638,7 @@ function aplicarDiario() {
     let totalMeta = 0;
     let totalProd = 0;
 
-    dados.forEach(l => {
-        if (normalizarDataExcel(l["Data"]) !== data) return;
-        if (uo && String(l["Cód.UO"]) !== String(uo)) return;
+    obterLinhasPorDataUo(data, uo).forEach(l => {
         const horaLinha = obterHoraLinha(l);
         if (turnoEspecial) {
             if (!horasVisiveis.includes(horaLinha)) return;
@@ -5613,7 +5814,9 @@ async function aplicarTabelaGeral() {
         return;
     }
 
-    calcularFaixas(campo, uo, data, FAIXAS);
+    const horasFonte = obterListaHorasTabelaGeral(uo, data);
+    window.__ultimaHoraTabelaGeralDia = horasFonte[horasFonte.length - 1] || "";
+    calcularFaixas(campo, uo, data, horasFonte);
     const codigosTurnoSelecionado = obterCodigosTurnoSelecionado(data, uo);
 
     const horaFiltroRaw = String(horaSelect?.value || "").trim();
@@ -5639,11 +5842,12 @@ async function aplicarTabelaGeral() {
     let totalMeta = 0;
     let totalProd = 0;
     let totalPrevisaoProd = 0;
-    const faixaPrevisao = obterFaixaBasePrevisaoTabelaGeral(faixaAtual);
+    const horasFonteIndex = horasFonte.indexOf(faixaAtual);
+    const faixaPrevisao = turnoComercialAtivo()
+        ? (horasFonte[horasFonteIndex > 0 ? horasFonteIndex - 1 : horasFonteIndex] || faixaAtual)
+        : obterFaixaBasePrevisaoTabelaGeral(faixaAtual);
 
-    dados.forEach(l => {
-        if (normalizarDataExcel(l["Data"]) !== data) return;
-        if (uo && String(obterValorColuna(l, ["Cód.UO", "CÃ³d.UO", "CÃƒÂ³d.UO", "COD_UO", "UO"]) || "") !== String(uo)) return;
+    obterLinhasPorDataUo(data, uo).forEach(l => {
         const horaLinha = obterHoraLinha(l);
         if (horaLinha !== faixaAtual && horaLinha !== faixaPrevisao) return;
 
@@ -5936,6 +6140,189 @@ async function aplicarTabelaGeral() {
     </tr>`);
 
     tbody.innerHTML = linhasHtml.join("");
+    aplicarOrdenacaoTabelaGeralDom();
+
+    const supervisorAindaExiste = currentTabelaGeralSupervisorSelecionado &&
+        currentTabelaGeralResumo.porSupervisor[currentTabelaGeralSupervisorSelecionado];
+    if (!supervisorAindaExiste) {
+        currentTabelaGeralSupervisorSelecionado = "";
+    }
+    aplicarKpisResumoTabelaGeral(
+        currentTabelaGeralSupervisorSelecionado
+            ? currentTabelaGeralResumo.porSupervisor[currentTabelaGeralSupervisorSelecionado]
+            : currentTabelaGeralResumo.total
+    );
+    atualizarSelecaoSupervisorTabelaGeralUI();
+
+    filtrosAtivos = {};
+    adicionarFiltrosExcel();
+}
+
+async function aplicarTabelaGeralPeriodo() {
+    const uo = uoSelect.value;
+    const tipo = tipoSelect.value;
+    const campo = obterCampoPorTipo(tipo);
+    const datasPeriodo = obterDatasFiltroPeriodoAtual(uo);
+
+    montarCabecalhoGeral(tipo);
+
+    if (!datasPeriodo.length) {
+        limparTelaSemDados(tipo, "Nenhum dado para o período selecionado");
+        return;
+    }
+
+    const resumo = resumirPeriodo(datasPeriodo, campo, uo);
+    if (!resumo.diasComDados) {
+        limparTelaSemDados(tipo, "Nenhum dado válido para o período selecionado");
+        return;
+    }
+
+    if (modoAtualTxt) {
+        modoAtualTxt.innerText = `Tabela Geral - ${obterRotuloPeriodoFiltroAtual()}`;
+    }
+
+    const mapasDesignadosPorData = {};
+    await Promise.all(datasPeriodo.map(async (data) => {
+        try {
+            mapasDesignadosPorData[data] = await carregarResumoControleServicoDesignados(data, uo);
+        } catch (_) {
+            mapasDesignadosPorData[data] = {};
+        }
+    }));
+
+    const obterMetricasListaPeriodo = (nome = "") => {
+        const listaPeriodo = [];
+
+        datasPeriodo.forEach((data) => {
+            const faixaAtualData = ultimaFaixaDisponivel(uo, data);
+            if (!faixaAtualData) return;
+
+            const listaDia = montarListaEquipesSupervisor(nome, faixaAtualData, data, uo);
+            listaDia.forEach((item) => {
+                const codigo = String(item.codigo || "").trim();
+                listaPeriodo.push({
+                    ...item,
+                    servicosDesignados: codigo ? Number(mapasDesignadosPorData[data]?.[codigo] || 0) : 0
+                });
+            });
+        });
+
+        const totalExecutados = listaPeriodo.reduce((acc, item) => acc + toNumber(item.servicos), 0);
+        const totalImprodutivos = listaPeriodo.reduce((acc, item) => acc + toNumber(item.improdutivo), 0);
+
+        return {
+            mediaServicosDesignados: mediaNumerica(listaPeriodo.map(item => toNumber(item.servicosDesignados))),
+            mediaServicos: mediaNumerica(listaPeriodo.map(item => toNumber(item.servicos))),
+            mediaProdutivos: mediaNumerica(listaPeriodo.map(item => toNumber(item.produtivo))),
+            mediaImprodutivos: totalExecutados > 0 ? (totalImprodutivos / totalExecutados) * 100 : 0,
+            mediaInicioJornada: mediaNumerica(listaPeriodo.map(item => horaTextoParaMinutos(item.inicioJornada)).filter(v => Number.isFinite(v))),
+            mediaPrimeiroAtend: mediaNumerica(listaPeriodo.map(item => horaTextoParaMinutos(item.primeiroAtend)).filter(v => Number.isFinite(v))),
+            mediaUltimoAtend: mediaNumerica(listaPeriodo.map(item => horaTextoParaMinutos(item.ultimoAtend)).filter(v => Number.isFinite(v))),
+            mediaJornada: mediaNumerica(listaPeriodo.map(item => horaTextoParaMinutos(item.jornadaProd)).filter(v => Number.isFinite(v))),
+            totalServicosDesignados: listaPeriodo.reduce((acc, item) => acc + toNumber(item.servicosDesignados), 0),
+            totalServicosExecutados: totalExecutados,
+            totalServicosProdutivos: listaPeriodo.reduce((acc, item) => acc + toNumber(item.produtivo), 0),
+            totalServicosImprodutivos: totalImprodutivos
+        };
+    };
+
+    const linhasHtml = [];
+    let totalMeta = 0;
+    let totalProd = 0;
+    let totalPrevisaoProd = 0;
+    let totalEqGeral = 0;
+
+    currentTabelaGeralResumo = {
+        porSupervisor: {},
+        total: null
+    };
+
+    resumo.linhas.forEach((linha) => {
+        const totalEqLinha = linha.eq.AA + linha.eq.A + linha.eq.B + linha.eq.C + linha.eq.D;
+        const percProdDia = Number(linha.meta || 0) > 0 ? (Number(linha.prod || 0) / Number(linha.meta || 0)) * 100 : 0;
+        const faixaDia = classificar(percProdDia);
+        const previsaoProd = calcularPrevisaoNotaFinal(linha.prod);
+        const previsaoPercMeta = Number(linha.meta || 0) > 0 ? (previsaoProd / Number(linha.meta || 0)) * 100 : 0;
+        const previsaoFaixa = Number(linha.meta || 0) > 0 ? classificar(previsaoPercMeta) : "-";
+        const nomeEsc = escapeJsString(linha.nome);
+        const metricas = obterMetricasListaPeriodo(linha.nome);
+
+        totalMeta += Number(linha.meta || 0);
+        totalProd += Number(linha.prod || 0);
+        totalPrevisaoProd += previsaoProd;
+        totalEqGeral += totalEqLinha;
+
+        currentTabelaGeralResumo.porSupervisor[linha.nome] = {
+            nome: linha.nome,
+            metaDia: Number(linha.meta || 0),
+            prodDia: Number(linha.prod || 0),
+            totalEq: totalEqLinha,
+            totalServicosDesignados: metricas.totalServicosDesignados,
+            totalServicosExecutados: metricas.totalServicosExecutados,
+            totalServicosProdutivos: metricas.totalServicosProdutivos,
+            totalServicosImprodutivos: metricas.totalServicosImprodutivos
+        };
+
+        linhasHtml.push(`
+        <tr data-supervisor-geral="${escapeHtml(linha.nome)}">
+            <td class="link" onclick="alternarKpisSupervisorTabelaGeral('${nomeEsc}')">${escapeHtml(rotuloGrupoExibicao(linha.nome))}</td>
+            <td>${fmt3(linha.meta)}</td>
+            <td>${fmt3(linha.prod)}</td>
+            <td class="faixa-${faixaDia}">${faixaDia}</td>
+            <td>${Number(linha.meta || 0) > 0 ? `${percProdDia.toFixed(2)}%` : "-"}</td>
+            <td>${fmt3(previsaoProd)}</td>
+            <td>${Number(linha.meta || 0) > 0 ? `${previsaoPercMeta.toFixed(2)}%` : "-"}</td>
+            <td class="faixa-${previsaoFaixa}">${previsaoFaixa}</td>
+            <td>${fmt2(totalEqLinha)}</td>
+            <td>${fmt2(metricas.mediaServicosDesignados)}</td>
+            <td>${fmt2(metricas.mediaServicos)}</td>
+            <td>${fmt2(metricas.mediaProdutivos)}</td>
+            <td class="${metricas.mediaImprodutivos > 20 ? "improd-alta" : ""}">${fmt2(metricas.mediaImprodutivos)}%</td>
+            <td>${minutosParaHoraTexto(metricas.mediaInicioJornada)}</td>
+            <td>${minutosParaHoraTexto(metricas.mediaPrimeiroAtend)}</td>
+            <td>${minutosParaHoraTexto(metricas.mediaUltimoAtend)}</td>
+            <td>${minutosParaHoraTexto(metricas.mediaJornada)}</td>
+        </tr>`);
+    });
+
+    const metricasTotal = obterMetricasListaPeriodo("");
+    const percTotal = totalMeta > 0 ? (totalProd / totalMeta) * 100 : 0;
+    const faixaTotal = classificar(percTotal);
+    const previsaoPercTotal = totalMeta > 0 ? (totalPrevisaoProd / totalMeta) * 100 : 0;
+    const previsaoFaixaTotal = totalMeta > 0 ? classificar(previsaoPercTotal) : "-";
+
+    currentTabelaGeralResumo.total = {
+        metaDia: totalMeta,
+        prodDia: totalProd,
+        totalEq: totalEqGeral,
+        totalServicosDesignados: metricasTotal.totalServicosDesignados,
+        totalServicosExecutados: metricasTotal.totalServicosExecutados,
+        totalServicosProdutivos: metricasTotal.totalServicosProdutivos,
+        totalServicosImprodutivos: metricasTotal.totalServicosImprodutivos
+    };
+
+    linhasHtml.push(`
+    <tr class="resultado">
+        <td>TOTAL GERAL</td>
+        <td>${fmt3(totalMeta)}</td>
+        <td>${fmt3(totalProd)}</td>
+        <td class="faixa-${faixaTotal}">${faixaTotal}</td>
+        <td>${totalMeta > 0 ? `${percTotal.toFixed(2)}%` : "-"}</td>
+        <td>${fmt3(totalPrevisaoProd)}</td>
+        <td>${totalMeta > 0 ? `${previsaoPercTotal.toFixed(2)}%` : "-"}</td>
+        <td class="faixa-${previsaoFaixaTotal}">${previsaoFaixaTotal}</td>
+        <td>${fmt2(totalEqGeral)}</td>
+        <td>${fmt2(metricasTotal.mediaServicosDesignados)}</td>
+        <td>${fmt2(metricasTotal.mediaServicos)}</td>
+        <td>${fmt2(metricasTotal.mediaProdutivos)}</td>
+        <td class="${metricasTotal.mediaImprodutivos > 20 ? "improd-alta" : ""}">${fmt2(metricasTotal.mediaImprodutivos)}%</td>
+        <td>${minutosParaHoraTexto(metricasTotal.mediaInicioJornada)}</td>
+        <td>${minutosParaHoraTexto(metricasTotal.mediaPrimeiroAtend)}</td>
+        <td>${minutosParaHoraTexto(metricasTotal.mediaUltimoAtend)}</td>
+        <td>${minutosParaHoraTexto(metricasTotal.mediaJornada)}</td>
+    </tr>`);
+
+    tbody.innerHTML = linhasHtml.join("");
 
     const supervisorAindaExiste = currentTabelaGeralSupervisorSelecionado &&
         currentTabelaGeralResumo.porSupervisor[currentTabelaGeralSupervisorSelecionado];
@@ -5984,15 +6371,15 @@ function aplicarSemanal() {
 
     const intervalo = obterInicioEFimSemanaPorInput(semana);
     if (modoAtualTxt) {
-        modoAtualTxt.innerText = `Tabela Semanal (${intervalo.inicio} a ${intervalo.fim})`;
+        modoAtualTxt.innerText = modoTabela === "diario"
+            ? `Tabela Diária - Semana (${intervalo.inicio} a ${intervalo.fim})`
+            : `Tabela Semanal (${intervalo.inicio} a ${intervalo.fim})`;
     }
 
-    tbody.innerHTML = "";
-
-    resumo.linhas.forEach(l => {
+    const linhasHtml = resumo.linhas.map(l => {
         const totalEqLinha = l.eq.AA + l.eq.A + l.eq.B + l.eq.C + l.eq.D;
 
-        tbody.innerHTML += `
+        return `
         <tr class="linha-periodo-click" onclick="abrirModalPeriodoMedia('${escapeJsString(l.nome)}')">
             <td>${escapeHtml(rotuloGrupoExibicao(l.nome))}</td>
             <td>${fmt3(l.meta)}</td>
@@ -6015,7 +6402,7 @@ function aplicarSemanal() {
     const totalEqGeral =
         resumo.eqTot.AA + resumo.eqTot.A + resumo.eqTot.B + resumo.eqTot.C + resumo.eqTot.D;
 
-    tbody.innerHTML += `
+    linhasHtml.push(`
     <tr class="resultado linha-periodo-click" onclick="abrirModalPeriodoMedia('')">
         <td>TOTAL SEMANA</td>
         <td>${fmt3(resumo.totalMeta)}</td>
@@ -6038,7 +6425,9 @@ function aplicarSemanal() {
         <td>${fmt2(resumo.eqTot.B)}</td>
         <td>${fmt2(resumo.eqTot.C)}</td>
         <td>${fmt2(resumo.eqTot.D)}</td>
-    </tr>`;
+    </tr>`);
+
+    tbody.innerHTML = linhasHtml.join("");
 
     atualizarKpis(resumo.totalMeta, resumo.totalProd, resumo.eqTot, 2);
 
@@ -6075,12 +6464,14 @@ function aplicarMensal() {
         return;
     }
 
-    tbody.innerHTML = "";
+    if (modoAtualTxt && modoTabela === "diario") {
+        modoAtualTxt.innerText = `Tabela Diária - Mês ${anoMes}`;
+    }
 
-    resumo.linhas.forEach(l => {
+    const linhasHtml = resumo.linhas.map(l => {
         const totalEqLinha = l.eq.AA + l.eq.A + l.eq.B + l.eq.C + l.eq.D;
 
-        tbody.innerHTML += `
+        return `
         <tr class="linha-periodo-click" onclick="abrirModalPeriodoMedia('${escapeJsString(l.nome)}')">
             <td>${escapeHtml(rotuloGrupoExibicao(l.nome))}</td>
             <td>${fmt3(l.meta)}</td>
@@ -6103,7 +6494,7 @@ function aplicarMensal() {
     const totalEqGeral =
         resumo.eqTot.AA + resumo.eqTot.A + resumo.eqTot.B + resumo.eqTot.C + resumo.eqTot.D;
 
-    tbody.innerHTML += `
+    linhasHtml.push(`
     <tr class="resultado linha-periodo-click" onclick="abrirModalPeriodoMedia('')">
         <td>TOTAL GERAL</td>
         <td>${fmt3(resumo.totalMeta)}</td>
@@ -6126,7 +6517,9 @@ function aplicarMensal() {
         <td>${fmt2(resumo.eqTot.B)}</td>
         <td>${fmt2(resumo.eqTot.C)}</td>
         <td>${fmt2(resumo.eqTot.D)}</td>
-    </tr>`;
+    </tr>`);
+
+    tbody.innerHTML = linhasHtml.join("");
 
     atualizarKpis(resumo.totalMeta, resumo.totalProd, resumo.eqTot, 2);
 
@@ -6145,16 +6538,60 @@ function obterDatasDoPeriodoPersonalizado(uo, inicio, fim) {
     const maior = dataInicio <= dataFim ? dataFim : dataInicio;
 
     return [...new Set(
-        dados
+        obterLinhasPorDataUo("", uo)
             .filter(l => {
                 const data = normalizarDataExcel(l["Data"]);
                 if (!data) return false;
-                if (uo && String(l["Cód.UO"]) !== String(uo)) return false;
                 return data >= menor && data <= maior;
             })
             .map(l => normalizarDataExcel(l["Data"]))
             .filter(Boolean)
     )].sort();
+}
+
+function obterDatasFiltroPeriodoAtual(uo) {
+    const periodo = obterPeriodoFiltroAtual();
+
+    if (periodo === "semanal") {
+        return obterDatasDaSemanaSelecionada(uo, semanaSelect?.value || "");
+    }
+
+    if (periodo === "mensal") {
+        return obterDatasDoMes(uo, mesSelect?.value || "");
+    }
+
+    if (periodo === "periodo") {
+        return obterDatasDoPeriodoPersonalizado(
+            uo,
+            periodoInicioSelect?.value || "",
+            periodoFimSelect?.value || ""
+        );
+    }
+
+    return dataSelect?.value ? [dataSelect.value] : [];
+}
+
+function obterRotuloPeriodoFiltroAtual() {
+    const periodo = obterPeriodoFiltroAtual();
+
+    if (periodo === "semanal") {
+        const semana = semanaSelect?.value || "";
+        if (!semana) return "Semana";
+        const intervalo = obterInicioEFimSemanaPorInput(semana);
+        return `Semana (${intervalo.inicio} a ${intervalo.fim})`;
+    }
+
+    if (periodo === "mensal") {
+        return mesSelect?.value ? `Mês ${mesSelect.value}` : "Mês";
+    }
+
+    if (periodo === "periodo") {
+        const inicio = periodoInicioSelect?.value || "";
+        const fim = periodoFimSelect?.value || inicio;
+        return inicio && fim ? `Período (${inicio} a ${fim})` : "Período";
+    }
+
+    return dataSelect?.value || "Diário";
 }
 
 function aplicarPeriodoPersonalizado() {
@@ -6188,15 +6625,15 @@ function aplicarPeriodoPersonalizado() {
     }
 
     if (modoAtualTxt) {
-        modoAtualTxt.innerText = `Tabela por Período (${dataInicio} a ${dataFim})`;
+        modoAtualTxt.innerText = modoTabela === "diario"
+            ? `Tabela Diária - Período (${dataInicio} a ${dataFim})`
+            : `Tabela por Período (${dataInicio} a ${dataFim})`;
     }
 
-    tbody.innerHTML = "";
-
-    resumo.linhas.forEach(l => {
+    const linhasHtml = resumo.linhas.map(l => {
         const totalEqLinha = l.eq.AA + l.eq.A + l.eq.B + l.eq.C + l.eq.D;
 
-        tbody.innerHTML += `
+        return `
         <tr class="linha-periodo-click" onclick="abrirModalPeriodoMedia('${escapeJsString(l.nome)}')">
             <td>${escapeHtml(rotuloGrupoExibicao(l.nome))}</td>
             <td>${fmt3(l.meta)}</td>
@@ -6219,7 +6656,7 @@ function aplicarPeriodoPersonalizado() {
     const totalEqGeral =
         resumo.eqTot.AA + resumo.eqTot.A + resumo.eqTot.B + resumo.eqTot.C + resumo.eqTot.D;
 
-    tbody.innerHTML += `
+    linhasHtml.push(`
     <tr class="resultado linha-periodo-click" onclick="abrirModalPeriodoMedia('')">
         <td>TOTAL PERÍODO</td>
         <td>${fmt3(resumo.totalMeta)}</td>
@@ -6242,7 +6679,9 @@ function aplicarPeriodoPersonalizado() {
         <td>${fmt2(resumo.eqTot.B)}</td>
         <td>${fmt2(resumo.eqTot.C)}</td>
         <td>${fmt2(resumo.eqTot.D)}</td>
-    </tr>`;
+    </tr>`);
+
+    tbody.innerHTML = linhasHtml.join("");
 
     atualizarKpis(resumo.totalMeta, resumo.totalProd, resumo.eqTot, 2);
 
@@ -6289,12 +6728,10 @@ function aplicarQuinzenaEspecifica(numeroQuinzena) {
         return;
     }
 
-    tbody.innerHTML = "";
-
-    resumo.linhas.forEach(l => {
+    const linhasHtml = resumo.linhas.map(l => {
         const totalEqLinha = l.eq.AA + l.eq.A + l.eq.B + l.eq.C + l.eq.D;
 
-        tbody.innerHTML += `
+        return `
         <tr>
             <td>${escapeHtml(rotuloGrupoExibicao(l.nome))}</td>
             <td>${fmt3(l.meta)}</td>
@@ -6319,7 +6756,7 @@ function aplicarQuinzenaEspecifica(numeroQuinzena) {
     const totalEqGeral =
         resumo.eqTot.AA + resumo.eqTot.A + resumo.eqTot.B + resumo.eqTot.C + resumo.eqTot.D;
 
-    tbody.innerHTML += `
+    linhasHtml.push(`
     <tr class="resultado">
         <td>${numeroQuinzena === 1 ? "TOTAL 1ª QUINZENA" : "TOTAL 2ª QUINZENA"}</td>
         <td>${fmt3(resumo.totalMeta)}</td>
@@ -6342,7 +6779,9 @@ function aplicarQuinzenaEspecifica(numeroQuinzena) {
         <td>${fmt2(resumo.eqTot.B)}</td>
         <td>${fmt2(resumo.eqTot.C)}</td>
         <td>${fmt2(resumo.eqTot.D)}</td>
-    </tr>`;
+    </tr>`);
+
+    tbody.innerHTML = linhasHtml.join("");
 
     atualizarKpis(resumo.totalMeta, resumo.totalProd, resumo.eqTot, 2);
 
@@ -7941,7 +8380,7 @@ function adicionarFiltrosExcel() {
     const ths = document.querySelectorAll("#theadRow th");
 
     ths.forEach((th, colIndex) => {
-        const tituloColuna = th.innerText.trim().toUpperCase();
+        const tituloColuna = (th.querySelector(".th-label")?.innerText || th.innerText).trim().toUpperCase();
         if (!colunasPermitidas.includes(tituloColuna)) return;
         if (th.querySelector(".filtro-icon")) return;
 
@@ -8412,6 +8851,7 @@ tipoSelect.onchange = aplicar;
 if (turnoSelect) {
     turnoSelect.onchange = () => {
         const turnoEspecial = turnoTardeAtivo() || turnoMadrugadaAtivo();
+        atualizarOpcoesHora();
 
         if (modoTabela === "diario" || modoTabela === "geral" || modoTabela === "total-horas") {
             const carregar = turnoEspecial || modoTabela === "total-horas"
@@ -8449,7 +8889,36 @@ if (dataSelect) {
 
 if (periodoTabelaSelect) {
     periodoTabelaSelect.onchange = () => {
-        setModo(obterModoPorPeriodoTopo(periodoTabelaSelect.value));
+        if (!telaAceitaFiltroPeriodo()) {
+            setModo(obterModoPorPeriodoTopo(periodoTabelaSelect.value));
+            return;
+        }
+
+        const periodo = obterPeriodoFiltroAtual();
+
+        if (periodo === "semanal") {
+            popularSemanasDisponiveis();
+        }
+
+        if (periodo === "mensal" && mesSelect && !mesSelect.value) {
+            mesSelect.value = obterAnoMesAtual();
+        }
+
+        if (periodo === "periodo") {
+            const hoje = obterHojeISO();
+            if (periodoInicioSelect && !periodoInicioSelect.value) periodoInicioSelect.value = dataSelect?.value || hoje;
+            if (periodoFimSelect && !periodoFimSelect.value) periodoFimSelect.value = periodoInicioSelect?.value || hoje;
+        }
+
+        const periodoEspecial = periodo !== "diario";
+        if (grupoData) grupoData.classList.toggle("hidden", periodoEspecial);
+        if (grupoHora) grupoHora.classList.toggle("hidden", periodoEspecial);
+        if (grupoSemana) grupoSemana.classList.toggle("hidden", periodo !== "semanal");
+        if (grupoMes) grupoMes.classList.toggle("hidden", periodo !== "mensal");
+        if (grupoPeriodoInicio) grupoPeriodoInicio.classList.toggle("hidden", periodo !== "periodo");
+        if (grupoPeriodoFim) grupoPeriodoFim.classList.toggle("hidden", periodo !== "periodo");
+
+        carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
     };
 }
 
@@ -8463,7 +8932,7 @@ if (horaSelect) {
 
 if (semanaSelect) {
     semanaSelect.onchange = () => {
-        if (modoTabela === "semanal") {
+        if (modoTabela === "semanal" || (telaAceitaFiltroPeriodo() && obterPeriodoFiltroAtual() === "semanal")) {
             carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
         }
     };
@@ -8471,7 +8940,7 @@ if (semanaSelect) {
 
 if (mesSelect) {
     mesSelect.onchange = () => {
-        if (modoTabela === "mensal" || modoTabela === "quinzena1" || modoTabela === "quinzena2") {
+        if (modoTabela === "mensal" || modoTabela === "quinzena1" || modoTabela === "quinzena2" || (telaAceitaFiltroPeriodo() && obterPeriodoFiltroAtual() === "mensal")) {
             carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
         }
     };
@@ -8479,7 +8948,7 @@ if (mesSelect) {
 
 if (periodoInicioSelect) {
     periodoInicioSelect.onchange = () => {
-        if (modoTabela === "periodo") {
+        if (modoTabela === "periodo" || (telaAceitaFiltroPeriodo() && obterPeriodoFiltroAtual() === "periodo")) {
             carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
         }
     };
@@ -8487,7 +8956,7 @@ if (periodoInicioSelect) {
 
 if (periodoFimSelect) {
     periodoFimSelect.onchange = () => {
-        if (modoTabela === "periodo") {
+        if (modoTabela === "periodo" || (telaAceitaFiltroPeriodo() && obterPeriodoFiltroAtual() === "periodo")) {
             carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
         }
     };

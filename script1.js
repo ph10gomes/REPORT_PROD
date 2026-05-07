@@ -62,6 +62,40 @@ function normalizarLabelCard(valor) {
     .toUpperCase();
 }
 
+const HTML2CANVAS_CDN_URL = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+const scriptsExternosCarregando = new Map();
+
+function carregarScriptExterno(src) {
+  if (scriptsExternosCarregando.has(src)) return scriptsExternosCarregando.get(src);
+
+  const existente = document.querySelector(`script[src="${src}"]`);
+  if (existente) {
+    const promiseExistente = new Promise((resolve, reject) => {
+      existente.addEventListener('load', resolve, { once: true });
+      existente.addEventListener('error', () => reject(new Error(`Falha ao carregar script externo: ${src}`)), { once: true });
+    });
+    scriptsExternosCarregando.set(src, promiseExistente);
+    return promiseExistente;
+  }
+
+  const promise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`Falha ao carregar script externo: ${src}`));
+    document.head.appendChild(script);
+  });
+
+  scriptsExternosCarregando.set(src, promise);
+  return promise;
+}
+
+async function garantirHtml2Canvas() {
+  if (typeof html2canvas !== 'undefined') return;
+  await carregarScriptExterno(HTML2CANVAS_CDN_URL);
+}
+
 function obterCardKpi(seletorPainel, labelBusca) {
   const alvo = normalizarLabelCard(labelBusca);
   return Array.from(document.querySelectorAll(`${seletorPainel} .grid-card`)).find((card) =>
@@ -161,6 +195,8 @@ let andonAcordosBase = {};
 let andonFiltroCache = { key: '', values: {} };
 const MODAL_PAGE_SIZE = 300;
 let modalTabelaEstado = null;
+let modalDetalheEquipesDias = new Map();
+let modalEquipesVoltarContexto = null;
 
 function limparCacheAndon() {
   andonFiltroCache = { key: '', values: {} };
@@ -413,7 +449,35 @@ function obterCodigoEquipeLinha(row) {
 
 function obterDataControleLinha(row) {
   return normalizarDataIso(
-    obterValorPrimeiro(row, ['DATA_ATUALIZACAO', 'DATA_ATUALIZAÇÃO', 'DATA_ATUALIZAÃ‡ÃƒO', 'DATA_ATUALIZACAO_D', 'DATA_DESIGNACAO', 'DATA DESIGNACAO', 'DESIGNACAO'])
+    obterValorPrimeiro(row, [
+      'DATA_TERMINO_REAL',
+      'ENCERRAMENTO',
+      'DATA_TERMINO',
+      'DATA_ATUALIZACAO',
+      'DATA_ATUALIZAÇÃO',
+      'DATA_ATUALIZAÃ‡ÃƒO',
+      'DATA_ATUALIZACAO_D',
+      'DATA_DESIGNACAO',
+      'DATA DESIGNACAO',
+      'DESIGNACAO'
+    ])
+  );
+}
+
+function obterDataAtualizacaoControleLinha(row) {
+  return normalizarDataIso(
+    obterValorPrimeiro(row, [
+      'DATA_DESIGNACAO',
+      'DATA DESIGNACAO',
+      'DESIGNACAO',
+      'DATA_ATUALIZACAO',
+      'DATA_ATUALIZAÇÃO',
+      'DATA_ATUALIZAÃ‡ÃƒO',
+      'DATA_ATUALIZACAO_D',
+      'DATA ATUALIZACAO',
+      'DATA',
+      'Data'
+    ])
   );
 }
 
@@ -456,6 +520,7 @@ function obterChavePeriodoFiltroAndon() {
 
 function obterChaveCacheFiltroAndon() {
   const uo = String(headerSelectedUo || '').replace(/[^\d]/g, '') || 'todas';
+  const supervisor = normalizarTextoFiltroModal(headerSelectedSupervisor || '') || 'todos';
   const semanas = headerSelectedWeeks
     .map((week) => `${normalizarDataIso(week.start)}>${normalizarDataIso(week.end)}`)
     .join(',');
@@ -466,6 +531,7 @@ function obterChaveCacheFiltroAndon() {
   return [
     obterChavePeriodoFiltroAndon(),
     uo,
+    supervisor,
     semanas,
     mes,
     andonReportRows.length,
@@ -525,6 +591,7 @@ async function carregarControleServicoAndon() {
   const params = new URLSearchParams();
   if (periodo.inicio) params.set('dataInicio', periodo.inicio);
   if (periodo.fim) params.set('dataFim', periodo.fim);
+  params.set('dataRef', 'termino');
   params.set('limit', '50000');
   const query = params.toString();
 
@@ -587,6 +654,8 @@ function filtrarReportRowsAndon() {
     const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA']));
     const uo = obterUoLinha(row);
     if (headerSelectedUo && uo !== headerSelectedUo.replace(/[^\d]/g, '')) return false;
+    const supervisor = String(obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR', 'SUPERVISOR_EQUIPE']) || '').trim();
+    if (headerSelectedSupervisor && normalizarTextoFiltroModal(supervisor) !== normalizarTextoFiltroModal(headerSelectedSupervisor)) return false;
     return linhaPassaFiltrosPeriodo(dataIso);
   });
   return cache.reportRows;
@@ -595,10 +664,17 @@ function filtrarReportRowsAndon() {
 function filtrarControleRowsAndon() {
   const cache = obterCacheFiltroAndon();
   if (cache.controleRows) return cache.controleRows;
+  const codigosSupervisor = headerSelectedSupervisor
+    ? obterCodigosReportRows(filtrarReportRowsAndon())
+    : null;
   cache.controleRows = andonControleRows.filter((row) => {
     const dataIso = obterDataControleLinha(row);
     const uo = obterUoLinha(row);
     if (headerSelectedUo && uo !== headerSelectedUo.replace(/[^\d]/g, '')) return false;
+    if (codigosSupervisor) {
+      const codigo = String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim();
+      if (!codigosSupervisor.has(codigo)) return false;
+    }
     return linhaPassaFiltrosPeriodo(dataIso);
   });
   return cache.controleRows;
@@ -607,11 +683,18 @@ function filtrarControleRowsAndon() {
 function filtrarFolhaPontoRowsAndon() {
   const cache = obterCacheFiltroAndon();
   if (cache.folhaPontoRows) return cache.folhaPontoRows;
+  const codigosSupervisor = headerSelectedSupervisor
+    ? obterCodigosReportRows(filtrarReportRowsAndon())
+    : null;
   cache.folhaPontoRows = andonFolhaPontoRows.filter((row) => {
     const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
     if (!linhaPassaFiltrosPeriodo(dataIso)) return false;
     const uo = String(obterValorPrimeiro(row, ['COD_UO', 'UO']) || '').replace(/[^\d]/g, '');
     if (headerSelectedUo && uo && uo !== headerSelectedUo.replace(/[^\d]/g, '')) return false;
+    if (codigosSupervisor) {
+      const codigo = String(obterValorPrimeiro(row, ['COD_EQUIPE']) || '').trim();
+      if (!codigosSupervisor.has(codigo)) return false;
+    }
     return true;
   });
   return cache.folhaPontoRows;
@@ -666,26 +749,49 @@ function calcularClassificacaoLoteProdEquipes(rows = []) {
   return totalMeta > 0 ? formatClassificacao((totalProducao / totalMeta) * 100) : '--';
 }
 
+function obterEquipesDBaseLoteProd(rows = []) {
+  const mapa = new Map();
+
+  rows.forEach((row) => {
+    const codigo = obterCodigoEquipeLote(row);
+    if (!codigo) return;
+
+    const atual = mapa.get(codigo) || { metaDia: 0, prodDia: 0 };
+    atual.metaDia = Math.max(atual.metaDia, toNumberSafe(obterValorPrimeiro(row, ['META', 'Meta'])));
+    atual.prodDia = Math.max(atual.prodDia, toNumberSafe(obterValorPrimeiro(row, ['VALOR_US', 'Valor_US', 'valor_us'])));
+    mapa.set(codigo, atual);
+  });
+
+  const equipesD = new Set();
+  mapa.forEach((item, codigo) => {
+    const percentualDia = Number(item.metaDia || 0) > 0
+      ? (Number(item.prodDia || 0) / Number(item.metaDia || 0)) * 100
+      : 0;
+    if (classificarFaixa(percentualDia) === 'D') equipesD.add(String(codigo));
+  });
+
+  return {
+    totalEquipes: mapa.size,
+    totalMetaDia: Array.from(mapa.values()).reduce((acc, item) => acc + Number(item.metaDia || 0), 0),
+    totalProdDia: Array.from(mapa.values()).reduce((acc, item) => acc + Number(item.prodDia || 0), 0),
+    equipesD
+  };
+}
+
 function calcularResumoLoteProd(rows = []) {
-  const totalMeta = rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['META', 'Meta'])), 0);
-  const totalProducao = rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['VALOR_US', 'Valor_US', 'valor_us'])), 0);
-  const percentual = totalMeta > 0 ? (totalProducao / totalMeta) * 100 : NaN;
   const codigosUoAtual = obterCodigosEquipesUoAtual();
-  const equipesD = codigosUoAtual
-    ? filtrarLoteProdEquipesDRowsAndon().filter((row) => {
-        const codigo = String(obterValorPrimeiro(row, ['COD_EQUIPE', 'COD_EQUIPE_WM', 'NUM_EQUIPE']) || '').trim();
-        return codigosUoAtual.has(codigo);
-      }).length
-    : rows.reduce((acc, row) => {
-        const totalD = obterValorPrimeiro(row, ['EQUIPES_D', 'equipes_d']);
-        if (totalD !== '') return acc + toNumberSafe(totalD);
-        const faixa = String(obterValorPrimeiro(row, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || '').trim().toUpperCase();
-        return acc + (faixa === 'D' ? 1 : 0);
-      }, 0);
+  const rowsEquipes = filtrarLoteProdEquipesRowsAndon().filter((row) => {
+    if (!codigosUoAtual) return true;
+    return codigosUoAtual.has(obterCodigoEquipeLote(row));
+  });
+  const baseEquipes = obterEquipesDBaseLoteProd(rowsEquipes);
+  const totalMeta = baseEquipes.totalMetaDia || rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['META', 'Meta'])), 0);
+  const totalProducao = baseEquipes.totalProdDia || rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['VALOR_US', 'Valor_US', 'valor_us'])), 0);
+  const percentual = totalMeta > 0 ? (totalProducao / totalMeta) * 100 : NaN;
 
   return {
     classificacao: formatClassificacao(percentual),
-    equipesD
+    equipesD: baseEquipes.equipesD.size
   };
 }
 
@@ -718,6 +824,9 @@ function renderCabecalhoModalEquipesPadrao() {
   const tr = document.querySelector('#equipesModal thead tr');
   if (!tr) return;
   tr.innerHTML = `
+    <th>Datas</th>
+    <th>Dias Trab.</th>
+    <th>Supervisor</th>
     <th>Equipe</th>
     <th>Meta</th>
     <th>Produção</th>
@@ -738,7 +847,8 @@ function renderCabecalhoModalEquipesDLoteProd() {
   const tr = document.querySelector('#equipesModal thead tr');
   if (!tr) return;
   tr.innerHTML = `
-    <th>Data</th>
+    <th>Datas</th>
+    <th>Dias Trab.</th>
     <th>Supervisor</th>
     <th>Equipe</th>
     <th>Meta</th>
@@ -770,7 +880,204 @@ function renderCabecalhoModalEquipesDLoteProd() {
   `;
 }
 
-function renderCabecalhoModalAbsenteismo() {
+function montarLinhasModalEquipesLoteProd(rows = [], reportRowsModal = filtrarReportRowsAndon(), options = {}) {
+  const agruparPorData = Boolean(options.agruparPorData);
+  const obterChaveEquipe = (codigo, dataIso = '') => agruparPorData && dataIso ? `${codigo}__${dataIso}` : codigo;
+  const mapaWm = new Map(
+    montarLinhasModalEquipes(reportRowsModal, 'todas', filtrarControleRowsAndon(), { agruparPorData })
+      .map((item) => [String(item.codigo || '').trim(), item])
+      .filter(([codigo]) => Boolean(codigo))
+  );
+
+  const mapaSupervisor = new Map();
+  reportRowsModal.forEach((reportRow) => {
+    const codigo = String(obterCodigoEquipeLinha(reportRow) || '').trim();
+    if (!codigo || mapaSupervisor.has(codigo)) return;
+    mapaSupervisor.set(codigo, String(obterValorPrimeiro(reportRow, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']) || '-').trim() || '-');
+  });
+
+  const mapa = new Map();
+  rows.forEach((row) => {
+    const codigo = obterCodigoEquipeLote(row);
+    if (!codigo) return;
+
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+    const chave = obterChaveEquipe(codigo, dataIso);
+    const atual = mapa.get(chave) || {
+      codigo,
+      supervisor: '-',
+      equipe: String(obterValorPrimeiro(row, ['NOME_EQUIPE', 'EQUIPE', 'NOME']) || codigo).trim() || '-',
+      datas: [],
+      metaDia: 0,
+      prodDia: 0,
+      faixaLote: '-',
+      comparativo: '',
+      inicioJornada: '-',
+      inicioRefeicao: '-',
+      terminoRefeicao: '-',
+      primeiroAtendimento: '-',
+      ultimoAtendimento: '-',
+      fimJornada: '-',
+      jornadaProdutiva: '-'
+    };
+
+    if (dataIso && !atual.datas.includes(dataIso)) atual.datas.push(dataIso);
+    atual.supervisor = String(obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']) || mapaSupervisor.get(codigo) || atual.supervisor).trim() || atual.supervisor;
+    atual.metaDia = Math.max(atual.metaDia, toNumberSafe(obterValorPrimeiro(row, ['META', 'Meta'])));
+    atual.prodDia = Math.max(atual.prodDia, toNumberSafe(obterValorPrimeiro(row, ['VALOR_US', 'Valor_US', 'valor_us'])));
+
+    const faixa = String(obterValorPrimeiro(row, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || '').trim().toUpperCase();
+    if (faixa && faixa !== '-') atual.faixaLote = faixa;
+
+    if (row._SOMENTE_WM) {
+      atual.comparativo = 'SOMENTE WM';
+    }
+    if (row._SOMENTE_LOTE) {
+      atual.comparativo = 'SOMENTE LOTE';
+    }
+
+    mapa.set(chave, atual);
+  });
+
+  return Array.from(mapa.values()).map((item) => {
+    const dataItemIso = normalizarDataIso(item.datas && item.datas[0]);
+    const wm = mapaWm.get(obterChaveEquipe(String(item.codigo || '').trim(), dataItemIso))
+      || mapaWm.get(String(item.codigo || '').trim())
+      || {};
+    const metaWm = Number(wm.metaDia || 0);
+    const producaoWm = Number(wm.prodDia || 0);
+    const percentualWm = metaWm > 0 ? (producaoWm / metaWm) * 100 : 0;
+    const percentualLote = Number(item.metaDia || 0) > 0
+      ? (Number(item.prodDia || 0) / Number(item.metaDia || 0)) * 100
+      : 0;
+
+    return {
+      ...item,
+      data: formatarSequenciaDatasAndon(item.datas),
+      diasTrabalhados: contarDiasTrabalhadosAndon(item.datas),
+      metaWm,
+      producaoWm,
+      percentualWm,
+      faixaWm: wm.faixaDia || classificarFaixa(percentualWm),
+      percentualLote,
+      faixaLote: item.faixaLote || classificarFaixa(percentualLote),
+      inicioJornada: wm.inicioJornada || item.inicioJornada || '-',
+      inicioRefeicao: wm.inicioRefeicao || item.inicioRefeicao || '-',
+      terminoRefeicao: wm.terminoRefeicao || item.terminoRefeicao || '-',
+      primeiroAtendimento: wm.primeiroAtendimento || item.primeiroAtendimento || '-',
+      ultimoAtendimento: wm.ultimoAtendimento || item.ultimoAtendimento || '-',
+      fimJornada: wm.fimJornada || item.fimJornada || '-',
+      jornadaProdutiva: wm.jornadaProdutiva || item.jornadaProdutiva || '-',
+      comparativo: item.comparativo || (wm.codigo ? 'WM E LOTE' : 'SOMENTE LOTE')
+    };
+  }).sort((a, b) => {
+    const dataA = normalizarDataIso(a.datas && a.datas[0]);
+    const dataB = normalizarDataIso(b.datas && b.datas[0]);
+    if (agruparPorData && dataA !== dataB) return dataA.localeCompare(dataB);
+    return String(a.equipe || '').localeCompare(String(b.equipe || ''), 'pt-BR', { sensitivity: 'base' });
+  });
+}
+
+function abrirModalEquipesDLoteProd(options = {}) {
+  if (!equipesModal || !equipesModalBody) return;
+  aplicarModalTelaCheia(true);
+
+  const somenteD = options.somenteD !== false;
+  const agruparPorData = Boolean(options.agruparPorData);
+  const habilitarDetalheDias = options.habilitarDetalheDias !== false && !agruparPorData;
+  const codigosUoAtual = obterCodigosEquipesUoAtual();
+  const reportRowsModal = options.reportRows || filtrarReportRowsAndon();
+  const rowsBase = Array.isArray(options.rows) ? options.rows : filtrarLoteProdEquipesRowsAndon();
+  const rowsLoteTodasFiltradas = rowsBase.filter((row) => {
+    if (options.codigos && options.codigos.size) return options.codigos.has(obterCodigoEquipeLote(row));
+    if (!codigosUoAtual) return true;
+    return codigosUoAtual.has(obterCodigoEquipeLote(row));
+  });
+  const codigosLoteDRegra = obterEquipesDBaseLoteProd(rowsLoteTodasFiltradas).equipesD;
+  const rowsLoteFiltradas = somenteD
+    ? rowsLoteTodasFiltradas.filter((row) => codigosLoteDRegra.has(obterCodigoEquipeLote(row)))
+    : rowsLoteTodasFiltradas;
+
+  const lista = montarLinhasModalEquipesLoteProd(rowsLoteFiltradas, reportRowsModal, { agruparPorData });
+
+  renderCabecalhoModalEquipesDLoteProd();
+  equipesModal.classList.toggle('andon-modal-detalhe-datas', agruparPorData);
+
+  if (equipesModalTitle) equipesModalTitle.textContent = options.title || (somenteD ? 'Equipes D Lote Prod.' : 'Total Equipes Lote Prod.');
+
+  const totalDLoteNoComparativo = lista.length;
+  if (equipesModalMeta) {
+    equipesModalMeta.textContent = options.meta && !somenteD ? options.meta : (somenteD
+      ? `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | D Lote: ${formatInt(totalDLoteNoComparativo)}`
+      : `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(totalDLoteNoComparativo)}`);
+  }
+
+  modalDetalheEquipesDias = new Map();
+  configurarBotaoVoltarModalEquipes(options.voltarContexto || null);
+  if (habilitarDetalheDias) {
+    lista.forEach((item, index) => {
+      const detalheId = `lote-dias-${Date.now()}-${index}`;
+      item.detalheDiasId = detalheId;
+      modalDetalheEquipesDias.set(detalheId, {
+        tipoDetalhe: 'lote-prod',
+        item,
+        rows: rowsLoteFiltradas,
+        reportRows: reportRowsModal,
+        somenteD,
+        title: equipesModalTitle?.textContent || '',
+        meta: equipesModalMeta?.textContent || '',
+        origemOptions: {
+          ...options,
+          rows: rowsLoteFiltradas,
+          reportRows: reportRowsModal,
+          somenteD,
+          agruparPorData: false,
+          habilitarDetalheDias: true
+        }
+      });
+    });
+  }
+
+  renderizarModalBodyEmLotes(
+    lista,
+    (item) => {
+      const codigo = item.codigo;
+      return `
+        <tr>
+          <td class="andon-modal-datas" title="${item.data || '-'}">${item.data || '-'}</td>
+          <td class="${item.detalheDiasId && Number(item.diasTrabalhados || 0) > 0 ? 'andon-dias-trab-cell' : ''}" data-dias-id="${item.detalheDiasId || ''}">
+            ${habilitarDetalheDias && item.detalheDiasId && Number(item.diasTrabalhados || 0) > 0
+              ? `<button class="andon-dias-trab-btn" type="button" data-dias-id="${item.detalheDiasId}">${formatInt(item.diasTrabalhados || 0)}</button>`
+              : formatInt(item.diasTrabalhados || 0)}
+          </td>
+          <td>${item.supervisor || '-'}</td>
+          <td>${item.equipe || '-'}</td>
+          <td>${formatNumber3(item.metaWm)}</td>
+          <td>${formatNumber3(item.producaoWm)}</td>
+          <td class="andon-faixa faixa-${item.faixaWm || '-'}">${item.faixaWm || '-'}</td>
+          <td>${formatPercent(item.percentualWm)}</td>
+          <td>${formatNumber3Scale100(item.prodDia)}</td>
+          <td class="andon-faixa faixa-${item.faixaLote}">${item.faixaLote}</td>
+          <td>${formatPercent(item.percentualLote)}</td>
+          <td>${item.inicioJornada || '-'}</td>
+          <td>${item.inicioRefeicao || '-'}</td>
+          <td>${item.terminoRefeicao || '-'}</td>
+          <td>${item.primeiroAtendimento || '-'}</td>
+          <td>${item.ultimoAtendimento || '-'}</td>
+          <td>${item.fimJornada || '-'}</td>
+          <td>${item.jornadaProdutiva || '-'}</td>
+          <td>${item.comparativo}</td>
+        </tr>
+      `;
+    },
+    `<tr><td colspan="19" class="andon-modal-empty">Nenhuma equipe${somenteD ? ' D' : ''} encontrada no lote produtivo.</td></tr>`
+  );
+  renderizarRodapeModalLoteProd(lista);
+
+  equipesModal.classList.remove('hidden');
+}
+
+function abrirModalLoteProdDetalhes() {
   removerResumoControleServicoModal();
   const tr = document.querySelector('#equipesModal thead tr');
   if (!tr) return;
@@ -846,7 +1153,12 @@ function obterValorCelulaModal(row, coluna) {
 }
 
 function renderizarLinhaModal(row, columns) {
-  return `<tr>${columns.map((coluna) => `<td>${obterValorCelulaModal(row, coluna)}</td>`).join('')}</tr>`;
+  return `<tr>${columns.map((coluna) => {
+    const classe = coluna.className ? ` class="${coluna.className}"` : '';
+    const attrs = typeof coluna.attrs === 'function' ? ` ${coluna.attrs(row)}` : '';
+    const valor = typeof coluna.render === 'function' ? coluna.render(row) : obterValorCelulaModal(row, coluna);
+    return `<td${classe}${attrs}>${valor}</td>`;
+  }).join('')}</tr>`;
 }
 
 function obterRowsFiltradasModal() {
@@ -1056,6 +1368,156 @@ function aplicarModalTelaCheia(ativo = false) {
   if (equipesModal) equipesModal.classList.toggle('andon-modal-fullscreen', Boolean(ativo));
 }
 
+function obterBotaoVoltarModalEquipes() {
+  if (!equipesModal || !equipesModalClose) return null;
+  let botao = document.getElementById('equipesModalBack');
+  if (!botao) {
+    botao = document.createElement('button');
+    botao.type = 'button';
+    botao.id = 'equipesModalBack';
+    botao.className = 'andon-modal-back hidden';
+    botao.textContent = 'Voltar';
+    equipesModalClose.insertAdjacentElement('beforebegin', botao);
+  }
+  return botao;
+}
+
+function obterBotaoExportarImagemModalEquipes() {
+  if (!equipesModal || !equipesModalClose) return null;
+  let botao = document.getElementById('equipesModalExportImage');
+  if (!botao) {
+    botao = document.createElement('button');
+    botao.type = 'button';
+    botao.id = 'equipesModalExportImage';
+    botao.className = 'andon-modal-action';
+    botao.textContent = 'Exportar imagem';
+    equipesModalClose.insertAdjacentElement('beforebegin', botao);
+  }
+  return botao;
+}
+
+function configurarBotaoVoltarModalEquipes(contexto = null) {
+  modalEquipesVoltarContexto = contexto;
+  const botao = obterBotaoVoltarModalEquipes();
+  if (!botao) return;
+  botao.classList.toggle('hidden', !contexto);
+}
+
+function voltarModalEquipesAnterior() {
+  if (!modalEquipesVoltarContexto) return;
+  const contexto = modalEquipesVoltarContexto;
+  configurarBotaoVoltarModalEquipes(null);
+  if (contexto && contexto.tipoContexto === 'controle-servico') {
+    abrirModalControleServicoModelo(contexto.tipo || 'todos', contexto.title || 'Servicos', contexto.options || {});
+    return;
+  }
+  if (contexto && contexto.tipoContexto === 'lote-prod') {
+    abrirModalEquipesDLoteProd(contexto.options || {});
+    return;
+  }
+  abrirModalEquipesAndonContexto(contexto);
+}
+
+function aplicarEstilosInlineParaExportacao(origem, destino) {
+  if (!origem || !destino || origem.nodeType !== 1 || destino.nodeType !== 1) return;
+  const estilo = window.getComputedStyle(origem);
+  destino.style.cssText = Array.from(estilo)
+    .map((prop) => `${prop}:${estilo.getPropertyValue(prop)};`)
+    .join('');
+
+  Array.from(origem.children).forEach((filho, index) => {
+    aplicarEstilosInlineParaExportacao(filho, destino.children[index]);
+  });
+}
+
+function prepararCloneModalParaImagem(dialogClone) {
+  dialogClone.querySelectorAll('.andon-modal-close, .andon-modal-back, .andon-modal-action').forEach((el) => el.remove());
+  dialogClone.querySelectorAll('.andon-modal-table-wrap, .andon-modal-body').forEach((el) => {
+    el.style.overflow = 'visible';
+    el.style.height = 'auto';
+    el.style.maxHeight = 'none';
+  });
+  dialogClone.style.width = `${Math.max(dialogClone.scrollWidth, dialogClone.offsetWidth)}px`;
+  dialogClone.style.height = 'auto';
+  dialogClone.style.maxHeight = 'none';
+  dialogClone.style.overflow = 'visible';
+}
+
+function nomeArquivoImagemModal() {
+  const titulo = String(equipesModalTitle?.textContent || 'modal').trim() || 'modal';
+  const limpo = titulo
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9_-]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'modal';
+  const agora = new Date();
+  const stamp = [
+    agora.getFullYear(),
+    String(agora.getMonth() + 1).padStart(2, '0'),
+    String(agora.getDate()).padStart(2, '0'),
+    String(agora.getHours()).padStart(2, '0'),
+    String(agora.getMinutes()).padStart(2, '0')
+  ].join('');
+  return `${limpo}_${stamp}.png`;
+}
+
+async function exportarImagemModalEquipes() {
+  const botao = obterBotaoExportarImagemModalEquipes();
+  const dialog = equipesModal?.querySelector('.andon-modal-dialog');
+  if (!dialog || !botao) return;
+
+  const textoOriginal = botao.textContent;
+  botao.disabled = true;
+  botao.textContent = 'Exportando...';
+
+  let areaExportacao = null;
+  try {
+    await garantirHtml2Canvas();
+
+    const clone = dialog.cloneNode(true);
+    areaExportacao = document.createElement('div');
+    areaExportacao.style.position = 'fixed';
+    areaExportacao.style.left = '-100000px';
+    areaExportacao.style.top = '0';
+    areaExportacao.style.background = '#ffffff';
+    areaExportacao.style.overflow = 'visible';
+    areaExportacao.appendChild(clone);
+    document.body.appendChild(areaExportacao);
+
+    aplicarEstilosInlineParaExportacao(dialog, clone);
+    prepararCloneModalParaImagem(clone);
+
+    const canvas = await html2canvas(clone, {
+      backgroundColor: '#ffffff',
+      scale: Math.min(window.devicePixelRatio || 1, 2),
+      useCORS: true,
+      allowTaint: true,
+      logging: false
+    });
+
+    areaExportacao.remove();
+    areaExportacao = null;
+
+    const pngUrl = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.href = pngUrl;
+    link.download = nomeArquivoImagemModal();
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } catch (error) {
+    console.error('Erro ao exportar imagem do modal:', error);
+    alert('Não foi possível exportar a imagem deste modal.');
+  } finally {
+    if (areaExportacao && areaExportacao.parentNode) {
+      areaExportacao.remove();
+    }
+    botao.disabled = false;
+    botao.textContent = textoOriginal;
+  }
+}
+
 function renderizarModalBodyEmLotes(rows = [], renderRow, emptyHtml = '', chunkSize = 500) {
   if (!equipesModalBody) return;
   const lista = Array.isArray(rows) ? rows : Array.from(rows || []);
@@ -1089,6 +1551,156 @@ function renderizarModalBodyEmLotes(rows = [], renderRow, emptyHtml = '', chunkS
   setTimeout(ativarFiltrosOrdenacaoModal, 0);
 }
 
+function removerRodapeModalEquipes() {
+  equipesModal?.querySelector('.andon-modal-table tfoot')?.remove();
+}
+
+function formatarMediaHoraModalEquipes(rows = [], campo = '') {
+  return formatHoraMedia(mediaNumericaAndon(
+    rows.map((row) => horaParaMinutos(row[campo])).filter((valor) => Number.isFinite(valor))
+  )).replace('--', '-');
+}
+
+function obterMetaRodapeModalEquipes(rows = []) {
+  const metas = rows
+    .map((row) => Number(row.metaDia || 0))
+    .filter((valor) => Number.isFinite(valor) && valor > 0);
+  if (!metas.length) return '-';
+  const unicas = new Set(metas.map((valor) => formatNumber3(valor)));
+  return unicas.size === 1 ? Array.from(unicas)[0] : formatNumber3(mediaNumericaAndon(metas));
+}
+
+function obterTextoAgrupadoRodapeModalEquipes(rows = [], campo = '') {
+  const valores = rows
+    .map((row) => String(row[campo] || '').trim())
+    .filter(Boolean);
+  if (!valores.length) return '-';
+  const unicos = new Map();
+  valores.forEach((valor) => {
+    const chave = normalizarTextoFiltroModal(valor);
+    if (!unicos.has(chave)) unicos.set(chave, valor);
+  });
+  return unicos.size === 1 ? Array.from(unicos.values())[0] : 'TODOS';
+}
+
+function obterResumoRodapeModalEquipes(rows = []) {
+  const datas = rows
+    .flatMap((row) => Array.isArray(row.datas) ? row.datas : [])
+    .map((data) => normalizarDataIso(data))
+    .filter(Boolean)
+    .sort();
+  const primeiraData = datas.length ? formatarDataBrAndon(datas[0]) : '-';
+  const ultimaData = datas.length ? formatarDataBrAndon(datas[datas.length - 1]) : '-';
+  const diasTrabalhados = rows.reduce((acc, row) => acc + Number(row.diasTrabalhados || 0), 0);
+  const producaoMedia = mediaNumericaAndon(rows.map((row) => Number(row.prodDia || 0)).filter((valor) => Number.isFinite(valor)));
+  const metaMedia = mediaNumericaAndon(rows.map((row) => Number(row.metaDia || 0)).filter((valor) => Number.isFinite(valor) && valor > 0));
+  const percProdDia = Number.isFinite(metaMedia) && metaMedia > 0 && Number.isFinite(producaoMedia)
+    ? (producaoMedia / metaMedia) * 100
+    : Number.NaN;
+  const faixaDia = Number.isFinite(percProdDia) ? classificarFaixa(percProdDia) : '-';
+
+  return {
+    datas: primeiraData === ultimaData ? primeiraData : `${primeiraData} a ${ultimaData}`,
+    diasTrabalhados,
+    supervisor: obterTextoAgrupadoRodapeModalEquipes(rows, 'supervisor'),
+    equipe: obterTextoAgrupadoRodapeModalEquipes(rows, 'equipe'),
+    meta: obterMetaRodapeModalEquipes(rows),
+    producao: Number.isFinite(producaoMedia) ? formatNumber3(producaoMedia) : '-',
+    faixaDia,
+    percProdDia: Number.isFinite(percProdDia) ? formatPercent(percProdDia) : '-',
+    inicioJornada: formatarMediaHoraModalEquipes(rows, 'inicioJornada'),
+    inicioRefeicao: formatarMediaHoraModalEquipes(rows, 'inicioRefeicao'),
+    terminoRefeicao: formatarMediaHoraModalEquipes(rows, 'terminoRefeicao'),
+    primeiroAtendimento: formatarMediaHoraModalEquipes(rows, 'primeiroAtendimento'),
+    ultimoAtendimento: formatarMediaHoraModalEquipes(rows, 'ultimoAtendimento'),
+    fimJornada: formatarMediaHoraModalEquipes(rows, 'fimJornada'),
+    jornadaProdutiva: formatarMediaHoraModalEquipes(rows, 'jornadaProdutiva')
+  };
+}
+
+function renderizarRodapeModalEquipes(rows = []) {
+  removerRodapeModalEquipes();
+  if (!equipesModal || !rows.length) return;
+  const table = equipesModal.querySelector('.andon-modal-table');
+  if (!table) return;
+  const resumo = obterResumoRodapeModalEquipes(rows);
+  table.insertAdjacentHTML('beforeend', `
+    <tfoot class="andon-modal-footer-summary">
+      <tr>
+        <td>${resumo.datas}</td>
+        <td>${formatInt(resumo.diasTrabalhados)}</td>
+        <td>${resumo.supervisor}</td>
+        <td>${resumo.equipe}</td>
+        <td>${resumo.meta}</td>
+        <td>${resumo.producao}</td>
+        <td class="andon-faixa faixa-${resumo.faixaDia || '-'}">${resumo.faixaDia || '-'}</td>
+        <td>${resumo.percProdDia}</td>
+        <td>${resumo.inicioJornada}</td>
+        <td>${resumo.inicioRefeicao}</td>
+        <td>${resumo.terminoRefeicao}</td>
+        <td>${resumo.primeiroAtendimento}</td>
+        <td>${resumo.ultimoAtendimento}</td>
+        <td>${resumo.fimJornada}</td>
+        <td>${resumo.jornadaProdutiva}</td>
+      </tr>
+    </tfoot>
+  `);
+}
+
+function renderizarRodapeModalLoteProd(rows = []) {
+  removerRodapeModalEquipes();
+  if (!equipesModal || !rows.length) return;
+  const table = equipesModal.querySelector('.andon-modal-table');
+  if (!table) return;
+
+  const datas = rows
+    .flatMap((row) => Array.isArray(row.datas) ? row.datas : [])
+    .map((data) => normalizarDataIso(data))
+    .filter(Boolean)
+    .sort();
+  const primeiraData = datas.length ? formatarDataBrAndon(datas[0]) : '-';
+  const ultimaData = datas.length ? formatarDataBrAndon(datas[datas.length - 1]) : '-';
+  const diasTrabalhados = rows.reduce((acc, row) => acc + Number(row.diasTrabalhados || 0), 0);
+  const metaWmMedia = mediaNumericaAndon(rows.map((row) => Number(row.metaWm || 0)).filter((valor) => Number.isFinite(valor) && valor > 0));
+  const prodWmMedia = mediaNumericaAndon(rows.map((row) => Number(row.producaoWm || 0)).filter((valor) => Number.isFinite(valor)));
+  const percWm = Number.isFinite(metaWmMedia) && metaWmMedia > 0 && Number.isFinite(prodWmMedia)
+    ? (prodWmMedia / metaWmMedia) * 100
+    : Number.NaN;
+  const prodLoteMedia = mediaNumericaAndon(rows.map((row) => Number(row.prodDia || 0)).filter((valor) => Number.isFinite(valor)));
+  const metaLoteMedia = mediaNumericaAndon(rows.map((row) => Number(row.metaDia || 0)).filter((valor) => Number.isFinite(valor) && valor > 0));
+  const percLote = Number.isFinite(metaLoteMedia) && metaLoteMedia > 0 && Number.isFinite(prodLoteMedia)
+    ? (prodLoteMedia / metaLoteMedia) * 100
+    : Number.NaN;
+  const faixaWm = Number.isFinite(percWm) ? classificarFaixa(percWm) : '-';
+  const faixaLote = Number.isFinite(percLote) ? classificarFaixa(percLote) : '-';
+
+  table.insertAdjacentHTML('beforeend', `
+    <tfoot class="andon-modal-footer-summary">
+      <tr>
+        <td>${primeiraData === ultimaData ? primeiraData : `${primeiraData} a ${ultimaData}`}</td>
+        <td>${formatInt(diasTrabalhados)}</td>
+        <td>${obterTextoAgrupadoRodapeModalEquipes(rows, 'supervisor')}</td>
+        <td>${obterTextoAgrupadoRodapeModalEquipes(rows, 'equipe')}</td>
+        <td>${Number.isFinite(metaWmMedia) ? formatNumber3(metaWmMedia) : '-'}</td>
+        <td>${Number.isFinite(prodWmMedia) ? formatNumber3(prodWmMedia) : '-'}</td>
+        <td class="andon-faixa faixa-${faixaWm}">${faixaWm}</td>
+        <td>${Number.isFinite(percWm) ? formatPercent(percWm) : '-'}</td>
+        <td>${Number.isFinite(prodLoteMedia) ? formatNumber3Scale100(prodLoteMedia) : '-'}</td>
+        <td class="andon-faixa faixa-${faixaLote}">${faixaLote}</td>
+        <td>${Number.isFinite(percLote) ? formatPercent(percLote) : '-'}</td>
+        <td>${formatarMediaHoraModalEquipes(rows, 'inicioJornada')}</td>
+        <td>${formatarMediaHoraModalEquipes(rows, 'inicioRefeicao')}</td>
+        <td>${formatarMediaHoraModalEquipes(rows, 'terminoRefeicao')}</td>
+        <td>${formatarMediaHoraModalEquipes(rows, 'primeiroAtendimento')}</td>
+        <td>${formatarMediaHoraModalEquipes(rows, 'ultimoAtendimento')}</td>
+        <td>${formatarMediaHoraModalEquipes(rows, 'fimJornada')}</td>
+        <td>${formatarMediaHoraModalEquipes(rows, 'jornadaProdutiva')}</td>
+        <td>${obterTextoAgrupadoRodapeModalEquipes(rows, 'comparativo')}</td>
+      </tr>
+    </tfoot>
+  `);
+}
+
 function abrirModalTabelaGenerica({ title = 'Detalhes', meta = '', columns = [], rows = [], empty = 'Nenhum registro encontrado.' } = {}) {
   if (!equipesModal || !equipesModalBody) return;
   const listaRows = Array.isArray(rows) ? rows : Array.from(rows || []);
@@ -1111,8 +1723,12 @@ function abrirModalTabelaGenerica({ title = 'Detalhes', meta = '', columns = [],
 function removerResumoControleServicoModal() {
   document.getElementById('controleServicoResumoModal')?.remove();
   document.getElementById('andonModalPagination')?.remove();
+  removerRodapeModalEquipes();
   equipesModal?.classList.remove('andon-modal-controle-servico');
+  equipesModal?.classList.remove('andon-modal-controle-agregado');
+  equipesModal?.classList.remove('andon-modal-detalhe-datas');
   modalTabelaEstado = null;
+  configurarBotaoVoltarModalEquipes(null);
 }
 
 function obterRowsReportPorCodigos(codigos = new Set()) {
@@ -1231,12 +1847,8 @@ function inserirResumoControleServicoModal(rows = []) {
 }
 
 function obterCodigosEquipesUoAtual() {
-  if (!headerSelectedUo) return null;
-  return new Set(
-    filtrarReportRowsAndon()
-      .map((row) => String(obterCodigoEquipeLinha(row) || '').trim())
-      .filter(Boolean)
-  );
+  if (!headerSelectedUo && !headerSelectedSupervisor) return null;
+  return obterCodigosReportRows(filtrarReportRowsAndon());
 }
 
 function abrirModalEquipesDLoteProd(options = {}) {
@@ -1262,12 +1874,16 @@ function abrirModalEquipesDLoteProd(options = {}) {
   });
   const rowsBase = Array.isArray(options.rows)
     ? options.rows
-    : (somenteD ? filtrarLoteProdEquipesDRowsAndon() : filtrarLoteProdEquipesRowsAndon());
-  const rowsLoteFiltradas = rowsBase.filter((row) => {
+    : filtrarLoteProdEquipesRowsAndon();
+  const rowsLoteTodasFiltradas = rowsBase.filter((row) => {
     if (options.codigos && options.codigos.size) return options.codigos.has(obterCodigoEquipeLote(row));
     if (!codigosUoAtual) return true;
     return codigosUoAtual.has(obterCodigoEquipeLote(row));
   });
+  const codigosLoteDRegra = obterEquipesDBaseLoteProd(rowsLoteTodasFiltradas).equipesD;
+  const rowsLoteFiltradas = somenteD
+    ? rowsLoteTodasFiltradas.filter((row) => codigosLoteDRegra.has(obterCodigoEquipeLote(row)))
+    : rowsLoteTodasFiltradas;
   const mapaLote = new Map();
   const codigosLote = new Set();
   rowsLoteFiltradas.forEach((row) => {
@@ -1428,11 +2044,13 @@ function obterResumoEquipesHoraAtual(rows = []) {
   return { horaAtual, horasAcumuladas, mapa };
 }
 
-function montarLinhasModalEquipes(rows = [], filtro = 'todas', controleRows = null) {
+function montarLinhasModalEquipes(rows = [], filtro = 'todas', controleRows = null, options = {}) {
+  const agruparPorData = Boolean(options.agruparPorData);
   const baseTotal = obterEquipesDBaseTotal(rows);
   const mapaControle = new Map();
   const codigosAcordadas = filtro === 'acordadas' ? obterCodigosSdcaPorTipo(rows, 'acordadas') : null;
   const codigosJustificadas = filtro === 'justificadas' ? obterCodigosSdcaPorTipo(rows, 'justificadas') : null;
+  const obterChaveEquipe = (codigo, dataIso = '') => agruparPorData && dataIso ? `${codigo}__${dataIso}` : codigo;
 
   const controleRowsBase = Array.isArray(controleRows) ? controleRows : filtrarControleRowsAndon();
 
@@ -1441,8 +2059,10 @@ function montarLinhasModalEquipes(rows = [], filtro = 'todas', controleRows = nu
       obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || ''
     ).trim();
     if (!codigo) return;
+    const dataControleIso = obterDataControleLinha(row);
+    const chaveControle = obterChaveEquipe(codigo, dataControleIso);
 
-    const atual = mapaControle.get(codigo) || {
+    const atual = mapaControle.get(chaveControle) || {
       inicioJornada: '-',
       primeiroAtendimento: '-',
       ultimoAtendimento: '-',
@@ -1474,16 +2094,26 @@ function montarLinhasModalEquipes(rows = [], filtro = 'todas', controleRows = nu
       atual.fimJornada = ultimo;
     }
 
-    mapaControle.set(codigo, atual);
+    mapaControle.set(chaveControle, atual);
   });
 
   const mapa = new Map();
+  const mapaFimJornadaReport = new Map();
   rows.forEach((row) => {
     const codigo = obterCodigoEquipeLinha(row);
     if (!codigo) return;
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+    const fimLinhaReport = obterHoraTexto(obterValorPrimeiro(row, ['FIM_JORNADA', 'Fim Jornada', 'Fim de Jornada']));
+    if (dataIso && fimLinhaReport && fimLinhaReport !== '-') {
+      mapaFimJornadaReport.set(`${codigo}__${dataIso}`, fimLinhaReport);
+    }
+    const chaveEquipe = obterChaveEquipe(codigo, dataIso);
 
-    const atual = mapa.get(codigo) || {
+    const atual = mapa.get(chaveEquipe) || {
       codigo,
+      data: formatarDataBrAndon(dataIso),
+      datas: [],
+      supervisor: String(obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR', 'SUPERVISOR_EQUIPE']) || '-').trim() || '-',
       equipe: String(obterValorPrimeiro(row, ['Nome', 'NOME_EQUIPE', 'NOME']) || '-'),
       metaDia: 0,
       prodDia: 0,
@@ -1495,6 +2125,9 @@ function montarLinhasModalEquipes(rows = [], filtro = 'todas', controleRows = nu
       fimJornada: '-',
       jornadaProdutiva: '-'
     };
+
+    if (dataIso && !atual.datas.includes(dataIso)) atual.datas.push(dataIso);
+    atual.data = formatarSequenciaDatasAndon(atual.datas);
 
     atual.metaDia = Math.max(
       atual.metaDia,
@@ -1536,21 +2169,27 @@ function montarLinhasModalEquipes(rows = [], filtro = 'todas', controleRows = nu
       atual.jornadaProdutiva = jornada;
     }
 
-    mapa.set(codigo, atual);
+    mapa.set(chaveEquipe, atual);
   });
 
   const lista = Array.from(mapa.values()).map((item) => {
-    const controle = mapaControle.get(item.codigo) || {};
+    const dataItemIso = normalizarDataIso(item.datas && item.datas[0]);
+    const controle = mapaControle.get(obterChaveEquipe(item.codigo, dataItemIso)) || {};
+    const fimJornadaReport = agruparPorData
+      ? (mapaFimJornadaReport.get(`${item.codigo}__${dataItemIso}`) || '-')
+      : '-';
     const inicioJornada = item.inicioJornada !== '-' ? item.inicioJornada : (controle.inicioJornada || '-');
     const primeiroAtendimento = item.primeiroAtendimento !== '-' ? item.primeiroAtendimento : (controle.primeiroAtendimento || '-');
     const ultimoAtendimento = item.ultimoAtendimento !== '-' ? item.ultimoAtendimento : (controle.ultimoAtendimento || '-');
-    const fimJornada = item.fimJornada !== '-' ? item.fimJornada : (controle.fimJornada || ultimoAtendimento || '-');
+    const fimJornada = item.fimJornada !== '-' ? item.fimJornada : fimJornadaReport;
     const jornadaProdutiva = item.jornadaProdutiva !== '-'
       ? item.jornadaProdutiva
       : diffHoraTexto(primeiroAtendimento, ultimoAtendimento);
 
     return {
       ...item,
+      data: formatarSequenciaDatasAndon(item.datas),
+      diasTrabalhados: contarDiasTrabalhadosAndon(item.datas),
       percProdDia: Number(item.metaDia || 0) > 0
         ? (Number(item.prodDia || 0) / Number(item.metaDia || 0)) * 100
         : 0,
@@ -1575,6 +2214,16 @@ function montarLinhasModalEquipes(rows = [], filtro = 'todas', controleRows = nu
     return true;
   });
 
+  if (agruparPorData) {
+    return lista.sort((a, b) => {
+      const dataA = normalizarDataIso(a.datas && a.datas[0]);
+      const dataB = normalizarDataIso(b.datas && b.datas[0]);
+      const diffData = String(dataA).localeCompare(String(dataB));
+      if (diffData !== 0) return diffData;
+      return String(a.equipe || '').localeCompare(String(b.equipe || ''), 'pt-BR', { sensitivity: 'base' });
+    });
+  }
+
   return lista.sort(compararFaixaDiaDesc);
 }
 
@@ -1583,13 +2232,17 @@ function abrirModalEquipesAndonContexto({
   rows = filtrarReportRowsAndon(),
   controleRows = null,
   title = '',
-  meta = ''
+  meta = '',
+  agruparPorData = false,
+  habilitarDetalheDias = true,
+  voltarContexto = null
 } = {}) {
   if (!equipesModal || !equipesModalBody) return;
   aplicarModalTelaCheia(true);
+  equipesModal.classList.toggle('andon-modal-detalhe-datas', Boolean(agruparPorData));
   renderCabecalhoModalEquipesPadrao();
 
-  const lista = montarLinhasModalEquipes(rows, filtro, controleRows);
+  const lista = montarLinhasModalEquipes(rows, filtro, controleRows, { agruparPorData });
   const titulo = title || (
     filtro === 'd'
       ? 'Equipes D WM'
@@ -1600,15 +2253,39 @@ function abrirModalEquipesAndonContexto({
           : 'Total de Equipes'
   );
 
+  const metaTexto = meta || `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Registros: ${formatInt(lista.length)}`;
+
   if (equipesModalTitle) equipesModalTitle.textContent = titulo;
-  if (equipesModalMeta) {
-    equipesModalMeta.textContent = meta || `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Registros: ${formatInt(lista.length)}`;
+  if (equipesModalMeta) equipesModalMeta.textContent = metaTexto;
+  configurarBotaoVoltarModalEquipes(voltarContexto);
+
+  modalDetalheEquipesDias = new Map();
+  if (habilitarDetalheDias) {
+    lista.forEach((item, index) => {
+      const detalheId = `dias-${Date.now()}-${index}`;
+      item.detalheDiasId = detalheId;
+      modalDetalheEquipesDias.set(detalheId, {
+        item,
+        rows,
+        controleRows,
+        filtro,
+        tituloOrigem: titulo,
+        metaOrigem: metaTexto
+      });
+    });
   }
 
   renderizarModalBodyEmLotes(
     lista,
     (item) => `
       <tr>
+        <td class="andon-modal-datas" title="${item.data || '-'}">${item.data || '-'}</td>
+        <td class="${habilitarDetalheDias && Number(item.diasTrabalhados || 0) > 0 ? 'andon-dias-trab-cell' : ''}" data-dias-id="${habilitarDetalheDias ? item.detalheDiasId || '' : ''}">${
+          habilitarDetalheDias && Number(item.diasTrabalhados || 0) > 0
+            ? `<button class="andon-dias-trab-btn" type="button" data-dias-id="${item.detalheDiasId}">${formatInt(item.diasTrabalhados || 0)}</button>`
+            : formatInt(item.diasTrabalhados || 0)
+        }</td>
+        <td>${item.supervisor || '-'}</td>
         <td>${item.equipe}</td>
         <td>${formatNumber3(item.metaDia)}</td>
         <td>${formatNumber3(item.prodDia)}</td>
@@ -1623,8 +2300,9 @@ function abrirModalEquipesAndonContexto({
         <td>${item.jornadaProdutiva || '-'}</td>
       </tr>
     `,
-    `<tr><td colspan="12" class="andon-modal-empty">Nenhuma equipe encontrada para este filtro.</td></tr>`
+    `<tr><td colspan="15" class="andon-modal-empty">Nenhuma equipe encontrada para este filtro.</td></tr>`
   );
+  renderizarRodapeModalEquipes(lista);
 
   equipesModal.classList.remove('hidden');
 }
@@ -1633,9 +2311,108 @@ function abrirModalEquipesAndon(filtro = 'todas') {
   return abrirModalEquipesAndonContexto({ filtro });
 }
 
+function abrirModalDetalheDiasTrabalhadosLoteProd(detalhe) {
+  if (!detalhe || !detalhe.item) return;
+  const codigo = String(detalhe.item.codigo || '').trim();
+  const datas = new Set((detalhe.item.datas || []).map((data) => normalizarDataIso(data)).filter(Boolean));
+  if (!codigo || !datas.size) return;
+
+  const rowsEquipe = (Array.isArray(detalhe.rows) ? detalhe.rows : []).filter((row) => {
+    const codigoRow = obterCodigoEquipeLote(row);
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+    return codigoRow === codigo && datas.has(dataIso);
+  });
+
+  abrirModalEquipesDLoteProd({
+    rows: rowsEquipe,
+    reportRows: detalhe.reportRows,
+    somenteD: false,
+    title: `Dias Trabalhados - ${detalhe.item.equipe || codigo}`,
+    meta: `Equipe: ${detalhe.item.equipe || '-'} | Datas: ${formatInt(datas.size)} | Origem: ${detalhe.title || '-'}`,
+    agruparPorData: true,
+    habilitarDetalheDias: false,
+    voltarContexto: {
+      tipoContexto: 'lote-prod',
+      options: detalhe.origemOptions || {
+        rows: detalhe.rows,
+        reportRows: detalhe.reportRows,
+        somenteD: detalhe.somenteD,
+        title: detalhe.title,
+        meta: detalhe.meta,
+        agruparPorData: false,
+        habilitarDetalheDias: true
+      }
+    }
+  });
+}
+
+function abrirModalDetalheDiasTrabalhadosEquipe(detalheId) {
+  const detalhe = modalDetalheEquipesDias.get(String(detalheId || ''));
+  if (!detalhe || !detalhe.item) return;
+  if (detalhe.tipoDetalhe === 'controle-servico') {
+    abrirModalControleServicoDetalheDias(detalhe);
+    return;
+  }
+  if (detalhe.tipoDetalhe === 'lote-prod') {
+    abrirModalDetalheDiasTrabalhadosLoteProd(detalhe);
+    return;
+  }
+
+  const codigo = String(detalhe.item.codigo || '').trim();
+  const datas = new Set((detalhe.item.datas || []).map((data) => normalizarDataIso(data)).filter(Boolean));
+  if (!codigo || !datas.size) return;
+
+  const rowsEquipe = (Array.isArray(detalhe.rows) ? detalhe.rows : []).filter((row) => {
+    const codigoRow = String(obterCodigoEquipeLinha(row) || '').trim();
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+    return codigoRow === codigo && datas.has(dataIso);
+  });
+
+  const controleBase = Array.isArray(detalhe.controleRows) ? detalhe.controleRows : filtrarControleRowsAndon();
+  const controleEquipe = controleBase.filter((row) => {
+    const codigoRow = String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim();
+    const dataIso = obterDataControleLinha(row);
+    return codigoRow === codigo && datas.has(dataIso);
+  });
+
+  abrirModalEquipesAndonContexto({
+    filtro: 'todas',
+    rows: rowsEquipe,
+    controleRows: controleEquipe,
+    title: `Dias Trabalhados - ${detalhe.item.equipe || codigo}`,
+    meta: `Equipe: ${detalhe.item.equipe || '-'} | Datas: ${formatInt(datas.size)} | Origem: ${detalhe.tituloOrigem || '-'}`,
+    agruparPorData: true,
+    habilitarDetalheDias: false,
+    voltarContexto: {
+      filtro: detalhe.filtro || 'todas',
+      rows: detalhe.rows,
+      controleRows: detalhe.controleRows,
+      title: detalhe.tituloOrigem || '',
+      meta: detalhe.metaOrigem || '',
+      agruparPorData: false,
+      habilitarDetalheDias: true
+    }
+  });
+}
+
 function formatarDataBrAndon(value) {
   const dataIso = normalizarDataIso(value);
   return dataIso ? dataIso.split('-').reverse().join('/') : '-';
+}
+
+function formatarSequenciaDatasAndon(datas = []) {
+  const datasValidas = Array.from(new Set(
+    datas.map((data) => normalizarDataIso(data)).filter(Boolean)
+  )).sort();
+  return datasValidas.length
+    ? datasValidas.map(formatarDataBrAndon).join(' | ')
+    : '-';
+}
+
+function contarDiasTrabalhadosAndon(datas = []) {
+  return Array.from(new Set(
+    datas.map((data) => normalizarDataIso(data)).filter(Boolean)
+  )).length;
 }
 
 function calcularResumoServicos13hPorEquipe(controleRows = []) {
@@ -2009,6 +2786,8 @@ function fecharModalEquipesAndon() {
   if (equipesModal) {
     equipesModal.classList.add('hidden');
     aplicarModalTelaCheia(false);
+    equipesModal.classList.remove('andon-modal-detalhe-datas');
+    configurarBotaoVoltarModalEquipes(null);
   }
 }
 
@@ -2436,13 +3215,19 @@ async function obterRowsControleServicoModalDireto(tipo = 'todos') {
   if (periodo.inicio) params.set('dataInicio', periodo.inicio);
   if (periodo.fim) params.set('dataFim', periodo.fim);
   if (headerSelectedUo) params.set('uo', String(headerSelectedUo).replace(/[^\d]/g, ''));
-  params.set('limit', '50000');
+  const usarDataTermino = tipo === 'improdutivos';
+  if (usarDataTermino) params.set('dataRef', 'termino');
+  params.set('limit', usarDataTermino ? '200000' : '50000');
 
   try {
     const resp = await fetch(`/api/controle-servico?${params.toString()}`, { cache: 'no-store' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const payload = await resp.json().catch(() => ({}));
-    const rows = Array.isArray(payload && payload.rows) ? payload.rows : [];
+    const rowsApi = Array.isArray(payload && payload.rows) ? payload.rows : [];
+    const codigosSupervisor = headerSelectedSupervisor ? obterCodigosEquipesUoAtual() : null;
+    const rows = codigosSupervisor
+      ? rowsApi.filter((row) => codigosSupervisor.has(obterCodigoEquipeControle(row)))
+      : rowsApi;
     andonControleRows = rows;
     andonControleLoadedKey = obterChavePeriodoFiltroAndon();
     limparCacheAndon();
@@ -2463,12 +3248,343 @@ async function obterRowsControleServicoModalDireto(tipo = 'todos') {
   }
 }
 
-async function abrirModalControleServicoModelo(tipo = 'todos', title = 'Servicos') {
+function obterCodigoEquipeControle(row) {
+  return String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim();
+}
+
+function obterNomeEquipeControle(row) {
+  return String(obterValorPrimeiro(row, ['NOME', 'NOME_EQUIPE', 'EQUIPE']) || '-').trim() || '-';
+}
+
+function obterUoControle(row) {
+  return String(obterValorPrimeiro(row, ['COD_UO', 'UO']) || '-').trim() || '-';
+}
+
+function obterResumoServicoEquipeControle(rows = []) {
+  let primeiroAtendimentoMin = Infinity;
+  let ultimoAtendimentoMin = -Infinity;
+  let primeiroAtendimento = '-';
+  let ultimoAtendimento = '-';
+  let produtivos = 0;
+  let improdutivos = 0;
+
+  rows.forEach((row) => {
+    const flag = normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS']));
+    if (flag === 'SIM') produtivos += 1;
+    if (flag === 'NAO') improdutivos += 1;
+
+    const acionamento = obterHoraTexto(obterValorPrimeiro(row, ['DATA_ACIONAMENTO', 'ACIONAMENTO', 'DATA ACIONAMENTO']));
+    const acionamentoMin = horaParaMinutos(acionamento);
+    if (Number.isFinite(acionamentoMin) && acionamentoMin < primeiroAtendimentoMin) {
+      primeiroAtendimentoMin = acionamentoMin;
+      primeiroAtendimento = acionamento;
+    }
+
+    const fim = obterHoraTexto(obterReferenciaFinalServico(row));
+    const fimMin = horaParaMinutos(fim);
+    if (Number.isFinite(fimMin) && fimMin > ultimoAtendimentoMin) {
+      ultimoAtendimentoMin = fimMin;
+      ultimoAtendimento = fim;
+    }
+  });
+
+  return {
+    servicos: rows.length,
+    produtivos,
+    improdutivos,
+    percImpedimento: rows.length ? (improdutivos / rows.length) * 100 : 0,
+    usPrev: rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['US_PREV', 'US PREV'])), 0),
+    usExec: rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['US_EXEC', 'US EXEC'])), 0),
+    primeiroAtendimento,
+    ultimoAtendimento
+  };
+}
+
+function obterDataTerminoControleLinha(row) {
+  return normalizarDataIso(obterReferenciaFinalServico(row));
+}
+
+function montarLinhasControleServicoPorEquipe(rows = [], obterSupervisorControle = () => '-', obterDataLinha = obterDataAtualizacaoControleLinha) {
+  const mapa = new Map();
+
+  rows.forEach((row) => {
+    const codigo = obterCodigoEquipeControle(row);
+    if (!codigo) return;
+    const dataIso = obterDataLinha(row);
+    const atual = mapa.get(codigo) || {
+      codigo,
+      uo: obterUoControle(row),
+      supervisor: obterSupervisorControle(row),
+      equipe: obterNomeEquipeControle(row),
+      datas: [],
+      rows: []
+    };
+
+    if (dataIso && !atual.datas.includes(dataIso)) atual.datas.push(dataIso);
+    if (!atual.supervisor || atual.supervisor === '-') atual.supervisor = obterSupervisorControle(row);
+    if (!atual.equipe || atual.equipe === '-') atual.equipe = obterNomeEquipeControle(row);
+    if (!atual.uo || atual.uo === '-') atual.uo = obterUoControle(row);
+    atual.rows.push(row);
+    mapa.set(codigo, atual);
+  });
+
+  return Array.from(mapa.values()).map((item) => {
+    const resumo = obterResumoServicoEquipeControle(item.rows);
+    const datas = Array.from(new Set(item.datas.map((data) => normalizarDataIso(data)).filter(Boolean))).sort();
+    return {
+      ...item,
+      datas,
+      data: formatarSequenciaDatasAndon(datas),
+      diasTrabalhados: contarDiasTrabalhadosAndon(datas),
+      ...resumo
+    };
+  }).sort((a, b) => {
+    const dataA = a.datas[0] || '';
+    const dataB = b.datas[0] || '';
+    const diffData = dataA.localeCompare(dataB);
+    if (diffData !== 0) return diffData;
+    return String(a.equipe || '').localeCompare(String(b.equipe || ''), 'pt-BR', { sensitivity: 'base' });
+  });
+}
+
+function obterColunasControleServicoDetalhe(obterSupervisorControle = () => '-') {
+  return [
+    { label: 'Datas', value: (row) => formatarDataBrAndon(obterDataAtualizacaoControleLinha(row)) },
+    { label: 'Dias Trab.', value: () => '1' },
+    { label: 'U.O.', value: (row) => obterUoControle(row) },
+    { label: 'Supervisor', value: obterSupervisorControle },
+    { label: 'Cod. Equipe', value: (row) => obterCodigoEquipeControle(row) || '-' },
+    { label: 'Equipe', value: (row) => obterNomeEquipeControle(row) },
+    { label: 'Servico', value: (row) => String(obterValorPrimeiro(row, ['NUM_SERVICO', 'SERVICO']) || '-') },
+    { label: 'Tipo Servico', value: (row) => String(obterValorPrimeiro(row, ['TIPO_SERVICO']) || '-') },
+    { label: 'Situacao', value: (row) => String(obterValorPrimeiro(row, ['SITUACAO']) || '-') },
+    { label: 'Produtivo', value: (row) => normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS'])) || '-' },
+    { label: 'COD. ATIV.', value: (row) => String(obterValorPrimeiro(row, ['COD_ATIV', 'COD. ATIV.', 'COD_ATIVIDADE']) || '-') },
+    { label: 'US Prev.', value: (row) => formatNumber3(toNumberSafe(obterValorPrimeiro(row, ['US_PREV', 'US PREV']))) },
+    { label: 'US Exec.', value: (row) => formatNumber3(toNumberSafe(obterValorPrimeiro(row, ['US_EXEC', 'US EXEC']))) },
+    { label: 'Designacao', value: (row) => obterHoraTexto(obterValorPrimeiro(row, ['DATA_DESIGNACAO', 'DESIGNACAO', 'DATA DESIGNACAO'])) },
+    { label: 'Lancamento Lote', value: (row) => obterHoraTexto(obterValorPrimeiro(row, ['DATA_LANCAMENTO_LOTE', 'LANCAMENTO_LOTE', 'LANCAMENTO LOTE', 'DATA_LANCAMENTO'])) || '-' },
+    { label: 'Acionamento', value: (row) => obterHoraTexto(obterValorPrimeiro(row, ['DATA_ACIONAMENTO', 'ACIONAMENTO', 'DATA ACIONAMENTO'])) },
+    { label: 'Localizacao', value: (row) => obterHoraTexto(obterValorPrimeiro(row, ['DATA_LOCALIZACAO', 'LOCALIZACAO'])) },
+    { label: 'Termino', value: (row) => obterHoraTexto(obterValorPrimeiro(row, ['DATA_TERMINO_REAL', 'ENCERRAMENTO', 'DATA_TERMINO'])) },
+    { label: 'AREA', value: (row) => String(obterValorPrimeiro(row, ['AREA', 'TIPO_AREA', 'TIPO AREA']) || '-') }
+  ];
+}
+
+function renderizarRodapeControleServicoPorEquipe(rows = []) {
+  removerRodapeModalEquipes();
+  if (!equipesModal || !rows.length) return;
+  const table = equipesModal.querySelector('.andon-modal-table');
+  if (!table) return;
+  const datas = rows.flatMap((row) => row.datas || []).map(normalizarDataIso).filter(Boolean).sort();
+  const primeiraData = datas.length ? formatarDataBrAndon(datas[0]) : '-';
+  const ultimaData = datas.length ? formatarDataBrAndon(datas[datas.length - 1]) : '-';
+  const dias = rows.reduce((acc, row) => acc + Number(row.diasTrabalhados || 0), 0);
+  const servicos = rows.reduce((acc, row) => acc + Number(row.servicos || 0), 0);
+  const produtivos = rows.reduce((acc, row) => acc + Number(row.produtivos || 0), 0);
+  const improdutivos = rows.reduce((acc, row) => acc + Number(row.improdutivos || 0), 0);
+  const usPrev = rows.reduce((acc, row) => acc + Number(row.usPrev || 0), 0);
+  const usExec = rows.reduce((acc, row) => acc + Number(row.usExec || 0), 0);
+  const perc = servicos ? (improdutivos / servicos) * 100 : 0;
+  const supervisor = obterTextoAgrupadoRodapeModalEquipes(rows, 'supervisor');
+  const equipe = obterTextoAgrupadoRodapeModalEquipes(rows, 'equipe');
+
+  table.insertAdjacentHTML('beforeend', `
+    <tfoot class="andon-modal-footer-summary">
+      <tr>
+        <td>${primeiraData === ultimaData ? primeiraData : `${primeiraData} a ${ultimaData}`}</td>
+        <td>${formatInt(dias)}</td>
+        <td>TODAS</td>
+        <td>${supervisor}</td>
+        <td>TODOS</td>
+        <td>${equipe}</td>
+        <td>${formatInt(servicos)}</td>
+        <td>${formatInt(produtivos)}</td>
+        <td>${formatInt(improdutivos)}</td>
+        <td>${formatPercent(perc)}</td>
+        <td>${formatNumber3(usPrev)}</td>
+        <td>${formatNumber3(usExec)}</td>
+        <td>-</td>
+        <td>-</td>
+      </tr>
+    </tfoot>
+  `);
+}
+
+function formatarMediaHoraControle(rows = [], keys = []) {
+  return formatHoraMedia(mediaNumericaAndon(
+    rows
+      .map((row) => horaParaMinutos(obterHoraTexto(obterValorPrimeiro(row, keys))))
+      .filter((valor) => Number.isFinite(valor))
+  )).replace('--', '-');
+}
+
+function obterTextoAgrupadoControle(rows = [], getter = () => '') {
+  const valores = rows.map(getter).map((valor) => String(valor || '').trim()).filter(Boolean);
+  if (!valores.length) return '-';
+  const unicos = new Map();
+  valores.forEach((valor) => {
+    const chave = normalizarTextoFiltroModal(valor);
+    if (!unicos.has(chave)) unicos.set(chave, valor);
+  });
+  return unicos.size === 1 ? Array.from(unicos.values())[0] : 'TODOS';
+}
+
+function renderizarRodapeControleServicoDetalhe(rows = [], obterSupervisorControle = () => '-') {
+  removerRodapeModalEquipes();
+  if (!equipesModal || !rows.length) return;
+  const table = equipesModal.querySelector('.andon-modal-table');
+  if (!table) return;
+  const datas = rows.map(obterDataAtualizacaoControleLinha).filter(Boolean).sort();
+  const datasUnicas = Array.from(new Set(datas));
+  const primeiraData = datasUnicas.length ? formatarDataBrAndon(datasUnicas[0]) : '-';
+  const ultimaData = datasUnicas.length ? formatarDataBrAndon(datasUnicas[datasUnicas.length - 1]) : '-';
+  const servicos = rows.length;
+  const usPrev = rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['US_PREV', 'US PREV'])), 0);
+  const usExec = rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['US_EXEC', 'US EXEC'])), 0);
+
+  table.insertAdjacentHTML('beforeend', `
+    <tfoot class="andon-modal-footer-summary">
+      <tr>
+        <td>${primeiraData === ultimaData ? primeiraData : `${primeiraData} a ${ultimaData}`}</td>
+        <td>${formatInt(datasUnicas.length)}</td>
+        <td>${obterTextoAgrupadoControle(rows, obterUoControle)}</td>
+        <td>${obterTextoAgrupadoControle(rows, obterSupervisorControle)}</td>
+        <td>${obterTextoAgrupadoControle(rows, obterCodigoEquipeControle)}</td>
+        <td>${obterTextoAgrupadoControle(rows, obterNomeEquipeControle)}</td>
+        <td>${formatInt(servicos)}</td>
+        <td>TODOS</td>
+        <td>TODOS</td>
+        <td>${obterTextoAgrupadoControle(rows, (row) => normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS'])) || '-')}</td>
+        <td>TODOS</td>
+        <td>${formatNumber3(usPrev)}</td>
+        <td>${formatNumber3(usExec)}</td>
+        <td>${formatarMediaHoraControle(rows, ['DATA_DESIGNACAO', 'DESIGNACAO', 'DATA DESIGNACAO'])}</td>
+        <td>${formatarMediaHoraControle(rows, ['DATA_LANCAMENTO_LOTE', 'LANCAMENTO_LOTE', 'LANCAMENTO LOTE', 'DATA_LANCAMENTO'])}</td>
+        <td>${formatarMediaHoraControle(rows, ['DATA_ACIONAMENTO', 'ACIONAMENTO', 'DATA ACIONAMENTO'])}</td>
+        <td>${formatarMediaHoraControle(rows, ['DATA_LOCALIZACAO', 'LOCALIZACAO'])}</td>
+        <td>${formatarMediaHoraControle(rows, ['DATA_TERMINO_REAL', 'ENCERRAMENTO', 'DATA_TERMINO'])}</td>
+        <td>${obterTextoAgrupadoControle(rows, (row) => String(obterValorPrimeiro(row, ['AREA', 'TIPO_AREA', 'TIPO AREA']) || '-'))}</td>
+      </tr>
+    </tfoot>
+  `);
+}
+
+function abrirModalControleServicoDetalheDias(detalhe) {
+  if (!detalhe || !detalhe.item) return;
+  const codigo = String(detalhe.item.codigo || '').trim();
+  const datas = new Set((detalhe.item.datas || []).map(normalizarDataIso).filter(Boolean));
+  if (!codigo || !datas.size) return;
+
+  const obterDataLinha = detalhe.obterDataLinha || obterDataAtualizacaoControleLinha;
+  const rowsEquipe = (Array.isArray(detalhe.rows) ? detalhe.rows : [])
+    .filter((row) => obterCodigoEquipeControle(row) === codigo && datas.has(obterDataLinha(row)))
+    .sort((a, b) => {
+      const dataA = obterDataLinha(a);
+      const dataB = obterDataLinha(b);
+      if (dataA !== dataB) return dataA.localeCompare(dataB);
+      return obterHoraTexto(obterValorPrimeiro(a, ['DATA_ATUALIZACAO', 'DATA_ATUALIZACAO_D', 'DATA ATUALIZACAO']))
+        .localeCompare(obterHoraTexto(obterValorPrimeiro(b, ['DATA_ATUALIZACAO', 'DATA_ATUALIZACAO_D', 'DATA ATUALIZACAO'])));
+    });
+
+  aplicarModalTelaCheia(true);
+  const columns = obterColunasControleServicoDetalhe(detalhe.obterSupervisorControle);
+  renderCabecalhoModalGenerico(columns);
+  equipesModal?.classList.add('andon-modal-controle-servico', 'andon-modal-controle-agregado', 'andon-modal-detalhe-datas');
+  if (equipesModalTitle) equipesModalTitle.textContent = `Dias Trabalhados - ${detalhe.item.equipe || codigo}`;
+  if (equipesModalMeta) equipesModalMeta.textContent = `Equipe: ${detalhe.item.equipe || '-'} | Datas: ${formatInt(datas.size)} | Origem: ${detalhe.tituloOrigem || '-'}`;
+  configurarBotaoVoltarModalEquipes({
+    tipoContexto: 'controle-servico',
+    tipo: detalhe.tipo || 'improdutivos',
+    title: detalhe.tituloOrigem || 'Impedimento',
+    options: { agruparPorEquipe: true }
+  });
+  renderizarModalTabelaPaginada(rowsEquipe, columns, 'Nenhum registro de impedimento encontrado para esta equipe.');
+  renderizarRodapeControleServicoDetalhe(rowsEquipe, detalhe.obterSupervisorControle);
+  equipesModal.classList.remove('hidden');
+  inserirResumoControleServicoModal(rowsEquipe);
+}
+
+async function abrirModalControleServicoModelo(tipo = 'todos', title = 'Servicos', options = {}) {
   if (!equipesModal || !equipesModalBody) return;
   const rows = await obterRowsControleServicoModalDireto(tipo);
+  const mapaSupervisor = obterMapaSupervisorPorEquipe(filtrarReportRowsAndon());
+  const obterSupervisorControle = (row) => {
+    const codigo = String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim();
+    return mapaSupervisor.get(codigo) || String(obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR', 'SUPERVISOR_EQUIPE']) || '-').trim() || '-';
+  };
+
+  const usarAgrupadoImpedimento = options.agruparPorEquipe || normalizarTextoFiltroModal(title) === 'IMPEDIMENTO';
+  if (usarAgrupadoImpedimento) {
+    const usarDadosTermino = title.toLowerCase() === 'impedimento' || tipo === 'improdutivos';
+    const lista = montarLinhasControleServicoPorEquipe(
+      rows,
+      obterSupervisorControle,
+      usarDadosTermino ? obterDataTerminoControleLinha : obterDataAtualizacaoControleLinha
+    );
+    modalDetalheEquipesDias = new Map();
+    lista.forEach((item, index) => {
+      const detalheId = `controle-dias-${Date.now()}-${index}`;
+      item.detalheDiasId = detalheId;
+      modalDetalheEquipesDias.set(detalheId, {
+        tipoDetalhe: 'controle-servico',
+        tipo,
+        item,
+        rows,
+        obterSupervisorControle,
+        obterDataLinha: usarDadosTermino ? obterDataTerminoControleLinha : obterDataAtualizacaoControleLinha,
+        tituloOrigem: title
+      });
+    });
+
+    const columns = [
+      {
+        label: 'Datas',
+        value: (row) => row.data || '-',
+        className: 'andon-modal-datas',
+        attrs: (row) => `title="${row.data || '-'}"`
+      },
+      {
+        label: 'Dias Trab.',
+        value: (row) => formatInt(row.diasTrabalhados || 0),
+        className: 'andon-dias-trab-cell',
+        attrs: (row) => `data-dias-id="${row.detalheDiasId || ''}"`,
+        render: (row) => Number(row.diasTrabalhados || 0) > 0
+          ? `<button class="andon-dias-trab-btn" type="button" data-dias-id="${row.detalheDiasId}">${formatInt(row.diasTrabalhados || 0)}</button>`
+          : formatInt(row.diasTrabalhados || 0)
+      },
+      { label: 'U.O.', value: (row) => row.uo || '-' },
+      { label: 'Supervisor', value: (row) => row.supervisor || '-' },
+      { label: 'Cod. Equipe', value: (row) => row.codigo || '-' },
+      { label: 'Equipe', value: (row) => row.equipe || '-' },
+      { label: 'Servicos', value: (row) => formatInt(row.servicos || 0) },
+      { label: 'Produtivos', value: (row) => formatInt(row.produtivos || 0) },
+      { label: 'Improdutivos', value: (row) => formatInt(row.improdutivos || 0) },
+      { label: '% Impedimento', value: (row) => formatPercent(row.percImpedimento || 0) },
+      { label: 'US Prev.', value: (row) => formatNumber3(row.usPrev || 0) },
+      { label: 'US Exec.', value: (row) => formatNumber3(row.usExec || 0) },
+      { label: '1 Atendimento', value: (row) => row.primeiroAtendimento || '-' },
+      { label: 'Ultimo Atendimento', value: (row) => row.ultimoAtendimento || '-' }
+    ];
+
+    aplicarModalTelaCheia(true);
+    renderCabecalhoModalGenerico(columns);
+    equipesModal.classList.add('andon-modal-controle-servico', 'andon-modal-controle-agregado');
+    equipesModal.classList.remove('andon-modal-detalhe-datas');
+    if (equipesModalTitle) equipesModalTitle.textContent = title;
+    if (equipesModalMeta) equipesModalMeta.textContent = `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(lista.length)} | Registros: ${formatInt(rows.length)}`;
+    configurarBotaoVoltarModalEquipes(null);
+    renderizarModalTabelaPaginada(lista, columns, 'Nenhuma equipe com impedimento encontrada.');
+    renderizarRodapeControleServicoPorEquipe(lista);
+    equipesModal.classList.remove('hidden');
+    inserirResumoControleServicoModal(rows);
+    return;
+  }
+
   const columns = [
     { label: 'Data Atualizacao', value: (row) => String(obterValorPrimeiro(row, ['DATA_ATUALIZACAO', 'DATA_ATUALIZACAO_D', 'DATA ATUALIZACAO']) || '-') },
     { label: 'U.O.', value: (row) => String(obterValorPrimeiro(row, ['COD_UO', 'UO']) || '-') },
+    { label: 'Supervisor', value: obterSupervisorControle },
     { label: 'Cod. Equipe', value: (row) => String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '-') },
     { label: 'Equipe', value: (row) => String(obterValorPrimeiro(row, ['NOME', 'NOME_EQUIPE']) || '-') },
     { label: 'Servico', value: (row) => String(obterValorPrimeiro(row, ['NUM_SERVICO', 'SERVICO']) || '-') },
@@ -2487,6 +3603,7 @@ async function abrirModalControleServicoModelo(tipo = 'todos', title = 'Servicos
   ];
 
   aplicarModalTelaCheia(true);
+  equipesModal.classList.remove('andon-modal-controle-agregado');
   renderCabecalhoModalGenerico(columns);
   if (equipesModalTitle) equipesModalTitle.textContent = title;
   if (equipesModalMeta) equipesModalMeta.textContent = `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Registros: ${formatInt(rows.length)}`;
@@ -2831,10 +3948,11 @@ function obterValoresMetricasSupervisor(metricas = []) {
 function obterLoteProdSupervisor(rows = []) {
   const codigos = obterCodigosReportRows(rows);
   const loteRows = filtrarLoteProdPorCodigos(filtrarLoteProdEquipesRowsAndon(), codigos);
-  const loteDRows = filtrarLoteProdPorCodigos(filtrarLoteProdEquipesDRowsAndon(), codigos);
   const baseTotal = obterEquipesDBaseTotal(rows);
   const codigosDwm = baseTotal.equipesD;
-  const codigosLoteD = new Set(loteDRows.map((row) => obterCodigoEquipeLote(row)).filter(Boolean));
+  const baseLote = obterEquipesDBaseLoteProd(loteRows);
+  const codigosLoteD = baseLote.equipesD;
+  const loteDRows = loteRows.filter((row) => codigosLoteD.has(obterCodigoEquipeLote(row)));
   const somenteWm = Array.from(codigosDwm).filter((codigo) => !codigosLoteD.has(String(codigo))).length;
   const somenteLote = Array.from(codigosLoteD).filter((codigo) => !codigosDwm.has(String(codigo))).length;
   const wmELote = Array.from(codigosDwm).filter((codigo) => codigosLoteD.has(String(codigo))).length;
@@ -3553,6 +4671,11 @@ async function carregarDadosAndon() {
     }
 
     renderHeaderUoOptions();
+    if (!headerSupervisorDisplay.value) {
+      headerSupervisorDisplay.value = 'Todos';
+    }
+    garantirSupervisorSelecionadoDisponivel();
+    renderHeaderSupervisorOptions();
     atualizarDashboardAndon();
     Promise.all([
       carregarControleServicoAndon(),
@@ -4154,6 +5277,26 @@ if (equipesModalClose) {
   equipesModalClose.addEventListener('click', fecharModalEquipesAndon);
 }
 
+const equipesModalBack = obterBotaoVoltarModalEquipes();
+if (equipesModalBack) {
+  equipesModalBack.addEventListener('click', voltarModalEquipesAnterior);
+}
+
+const equipesModalExportImage = obterBotaoExportarImagemModalEquipes();
+if (equipesModalExportImage) {
+  equipesModalExportImage.addEventListener('click', exportarImagemModalEquipes);
+}
+
+if (equipesModalBody) {
+  equipesModalBody.addEventListener('click', (event) => {
+    const alvoDias = event.target.closest('.andon-dias-trab-btn, .andon-dias-trab-cell');
+    if (!alvoDias) return;
+    event.preventDefault();
+    event.stopPropagation();
+    abrirModalDetalheDiasTrabalhadosEquipe(alvoDias.dataset.diasId);
+  });
+}
+
 if (equipesModal) {
   equipesModal.addEventListener('click', (event) => {
     if (event.target === equipesModal) fecharModalEquipesAndon();
@@ -4241,8 +5384,13 @@ const headerMonthWrapper = document.getElementById('headerMonthWrapper');
 const headerMonthDisplay = document.getElementById('headerMonthDisplay');
 const headerMonthClear = document.getElementById('headerMonthClear');
 const headerMonthPopup = document.getElementById('headerMonthPopup');
+const headerSupervisorWrapper = document.getElementById('headerSupervisorWrapper');
+const headerSupervisorDisplay = document.getElementById('headerSupervisorDisplay');
+const headerSupervisorClear = document.getElementById('headerSupervisorClear');
+const headerSupervisorPopup = document.getElementById('headerSupervisorPopup');
 
 let headerSelectedUo = '';
+let headerSelectedSupervisor = '';
 let headerSelectedDate = null;
 let headerSelectedMonth = null;   // { year, month } (0-indexed)
 let headerSelectedWeeks = [];     // array de { weekNum, start (Seg), end (Dom) } — acumulativo
@@ -4251,6 +5399,7 @@ let headerMonthPickerYear = new Date().getFullYear();
 let isHeaderUoOpen = false;
 let isHeaderDateOpen = false;
 let isHeaderMonthOpen = false;
+let isHeaderSupervisorOpen = false;
 
 const MONTH_NAMES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
@@ -4280,8 +5429,10 @@ function renderHeaderUoOptions() {
     button.addEventListener('click', () => {
       headerSelectedUo = optionValue;
       headerUoDisplay.value = option;
+      garantirSupervisorSelecionadoDisponivel();
       closeHeaderUoPicker();
       renderHeaderUoOptions();
+      renderHeaderSupervisorOptions();
       atualizarDashboardAndon();
     });
 
@@ -4292,6 +5443,7 @@ function renderHeaderUoOptions() {
 function openHeaderUoPicker() {
   closeHeaderDatePicker();
   closeHeaderMonthPicker();
+  closeHeaderSupervisorPicker();
   isHeaderUoOpen = true;
   headerUoPopup.classList.remove('hidden');
   headerUoDisplay.classList.add('active');
@@ -4308,8 +5460,89 @@ function closeHeaderUoPicker() {
 function clearHeaderUo() {
   headerSelectedUo = '';
   headerUoDisplay.value = 'Todas as U.O.';
+  garantirSupervisorSelecionadoDisponivel();
   renderHeaderUoOptions();
+  renderHeaderSupervisorOptions();
   closeHeaderUoPicker();
+  atualizarDashboardAndon();
+}
+
+function obterSupervisoresHeaderDisponiveis() {
+  const uoSelecionada = String(headerSelectedUo || '').replace(/[^\d]/g, '');
+  const mapa = new Map();
+  andonReportRows.forEach((row) => {
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA']));
+    if (!linhaPassaFiltrosPeriodo(dataIso)) return;
+    if (uoSelecionada && obterUoLinha(row) !== uoSelecionada) return;
+    const supervisor = String(obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR', 'SUPERVISOR_EQUIPE']) || '').trim();
+    if (!supervisor) return;
+    const chave = normalizarTextoFiltroModal(supervisor);
+    if (!mapa.has(chave)) mapa.set(chave, supervisor);
+  });
+  return Array.from(mapa.values()).sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+}
+
+function garantirSupervisorSelecionadoDisponivel() {
+  if (!headerSelectedSupervisor) return;
+  const disponiveis = new Set(obterSupervisoresHeaderDisponiveis().map((nome) => normalizarTextoFiltroModal(nome)));
+  if (!disponiveis.has(normalizarTextoFiltroModal(headerSelectedSupervisor))) {
+    headerSelectedSupervisor = '';
+    if (headerSupervisorDisplay) headerSupervisorDisplay.value = 'Todos';
+  }
+}
+
+function renderHeaderSupervisorOptions() {
+  if (!headerSupervisorPopup) return;
+  const supervisores = ['Todos', ...obterSupervisoresHeaderDisponiveis()];
+  headerSupervisorPopup.innerHTML = '';
+
+  supervisores.forEach((option) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'header-filter-option';
+    button.textContent = option;
+
+    const optionValue = option === 'Todos' ? '' : option;
+    if (normalizarTextoFiltroModal(headerSelectedSupervisor) === normalizarTextoFiltroModal(optionValue)) {
+      button.classList.add('active');
+    }
+
+    button.addEventListener('click', () => {
+      headerSelectedSupervisor = optionValue;
+      headerSupervisorDisplay.value = option;
+      limparCacheAndon();
+      closeHeaderSupervisorPicker();
+      renderHeaderSupervisorOptions();
+      atualizarDashboardAndon();
+    });
+
+    headerSupervisorPopup.appendChild(button);
+  });
+}
+
+function openHeaderSupervisorPicker() {
+  closeHeaderUoPicker();
+  closeHeaderDatePicker();
+  closeHeaderMonthPicker();
+  isHeaderSupervisorOpen = true;
+  headerSupervisorPopup.classList.remove('hidden');
+  headerSupervisorDisplay.classList.add('active');
+  renderHeaderSupervisorOptions();
+}
+
+function closeHeaderSupervisorPicker() {
+  if (!isHeaderSupervisorOpen) return;
+  isHeaderSupervisorOpen = false;
+  headerSupervisorPopup.classList.add('hidden');
+  headerSupervisorDisplay.classList.remove('active');
+}
+
+function clearHeaderSupervisor() {
+  headerSelectedSupervisor = '';
+  headerSupervisorDisplay.value = 'Todos';
+  limparCacheAndon();
+  renderHeaderSupervisorOptions();
+  closeHeaderSupervisorPicker();
   atualizarDashboardAndon();
 }
 
@@ -4446,6 +5679,7 @@ function renderHeaderDatePicker() {
 function openHeaderDatePicker() {
   closeHeaderUoPicker();
   closeHeaderMonthPicker();
+  closeHeaderSupervisorPicker();
   isHeaderDateOpen = true;
   headerDatePopup.classList.remove('hidden');
   headerDateDisplay.classList.add('active');
@@ -4475,6 +5709,8 @@ function updateWeekDisplay() {
   headerSelectedMonth = { year: periodStart.getFullYear(), month: periodStart.getMonth() };
   headerMonthDisplay.value = fmtHeaderMonth(periodStart.getFullYear(), periodStart.getMonth());
   headerMonthPickerYear = periodStart.getFullYear();
+  garantirSupervisorSelecionadoDisponivel();
+  renderHeaderSupervisorOptions();
 }
 
 function selectHeaderDate(date) {
@@ -4485,6 +5721,8 @@ function selectHeaderDate(date) {
   headerSelectedMonth = { year: date.getFullYear(), month: date.getMonth() };
   headerMonthDisplay.value = fmtHeaderMonth(date.getFullYear(), date.getMonth());
   headerMonthPickerYear = date.getFullYear();
+  garantirSupervisorSelecionadoDisponivel();
+  renderHeaderSupervisorOptions();
   closeHeaderDatePicker();
   atualizarDashboardAndon();
 }
@@ -4506,6 +5744,8 @@ function selectHeaderWeek(referenceDate) {
   }
 
   updateWeekDisplay();
+  garantirSupervisorSelecionadoDisponivel();
+  renderHeaderSupervisorOptions();
   renderHeaderDatePicker(); // re-renderiza para destacar semanas acumuladas
   atualizarDashboardAndon();
 }
@@ -4514,6 +5754,8 @@ function clearHeaderDate() {
   headerSelectedDate = null;
   headerSelectedWeeks = [];
   headerDateDisplay.value = '';
+  garantirSupervisorSelecionadoDisponivel();
+  renderHeaderSupervisorOptions();
   closeHeaderDatePicker();
   atualizarDashboardAndon();
 }
@@ -4579,6 +5821,7 @@ function renderHeaderMonthPicker() {
 function openHeaderMonthPicker() {
   closeHeaderUoPicker();
   closeHeaderDatePicker();
+  closeHeaderSupervisorPicker();
   isHeaderMonthOpen = true;
   headerMonthPopup.classList.remove('hidden');
   headerMonthDisplay.classList.add('active');
@@ -4603,6 +5846,8 @@ function selectHeaderMonth(year, month) {
   }
   // Navega o calendário de dia para o mês escolhido
   headerDatePickerMonth = new Date(year, month, 1);
+  garantirSupervisorSelecionadoDisponivel();
+  renderHeaderSupervisorOptions();
   closeHeaderMonthPicker();
   atualizarDashboardAndon();
 }
@@ -4610,6 +5855,8 @@ function selectHeaderMonth(year, month) {
 function clearHeaderMonth() {
   headerSelectedMonth = null;
   headerMonthDisplay.value = '';
+  garantirSupervisorSelecionadoDisponivel();
+  renderHeaderSupervisorOptions();
   closeHeaderMonthPicker();
   atualizarDashboardAndon();
 }
@@ -4648,10 +5895,23 @@ headerMonthClear.addEventListener('click', e => {
   clearHeaderMonth();
 });
 
+headerSupervisorDisplay.addEventListener('click', e => {
+  e.stopPropagation();
+  if (isHeaderSupervisorOpen) closeHeaderSupervisorPicker();
+  else openHeaderSupervisorPicker();
+});
+
+headerSupervisorClear.addEventListener('click', e => {
+  e.stopPropagation();
+  clearHeaderSupervisor();
+});
+
 document.addEventListener('click', e => {
   if (!headerUoWrapper.contains(e.target)) closeHeaderUoPicker();
   if (!headerDateWrapper.contains(e.target)) closeHeaderDatePicker();
   if (!headerMonthWrapper.contains(e.target)) closeHeaderMonthPicker();
+  if (!headerSupervisorWrapper.contains(e.target)) closeHeaderSupervisorPicker();
 });
 
 headerUoDisplay.value = 'Todas as U.O.';
+headerSupervisorDisplay.value = 'Todos';

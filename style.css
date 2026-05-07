@@ -905,6 +905,35 @@ thead th{
     z-index:2;
 }
 
+thead th.sortable-th{
+    cursor:pointer;
+    user-select:none;
+}
+
+thead th.sortable-th .th-label{
+    display:inline-block;
+    vertical-align:middle;
+}
+
+thead th.sortable-th .sort-indicator{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:14px;
+    margin-left:4px;
+    color:rgba(255,255,255,0.82);
+    font-size:11px;
+    font-weight:900;
+}
+
+thead th.sortable-th.sort-active .sort-indicator{
+    color:#ffffff;
+}
+
+thead th.sortable-th:hover{
+    background:linear-gradient(180deg, #3767b5 0%, #28569d 100%);
+}
+
 thead th:first-child{
     border-top-left-radius:16px;
 }

@@ -31,7 +31,7 @@ body {
 .topbar {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
   gap: 1rem;
   padding: 1.25rem 1.5rem;
@@ -207,7 +207,7 @@ body {
 }
 
 .topbar-title {
-  flex: 1;
+  flex: 0 1 340px;
   min-width: 240px;
   text-align: center;
   font-size: clamp(1.5rem, 3vw, 2.2rem);
@@ -524,6 +524,30 @@ body {
   cursor: pointer;
 }
 
+.andon-modal-back,
+.andon-modal-action {
+  align-self: flex-start;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  min-height: 34px;
+  padding: 0 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.andon-modal-back:hover,
+.andon-modal-action:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.andon-modal-action:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 .andon-modal-body {
   padding: 1rem 1.25rem 1.25rem;
   overflow: auto;
@@ -538,7 +562,7 @@ body {
 .andon-modal-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 980px;
+  min-width: 1680px;
   background: #ffffff;
 }
 
@@ -567,6 +591,20 @@ body {
   letter-spacing: 0.05em;
   color: #0f3d7a;
   z-index: 1;
+}
+
+.andon-modal-table tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: #dbeafe;
+  color: #082f64;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.andon-modal-table tfoot td.andon-faixa {
+  color: #ffffff;
 }
 
 .andon-modal-sort {
@@ -648,7 +686,63 @@ body {
 .andon-modal-table td:first-child,
 .andon-modal-table th:first-child {
   text-align: left;
+  min-width: 250px;
+}
+
+.andon-modal-table td.andon-modal-datas {
+  max-width: 250px;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.andon-modal.andon-modal-detalhe-datas .andon-modal-table td:first-child,
+.andon-modal.andon-modal-detalhe-datas .andon-modal-table th:first-child {
+  min-width: 118px;
+  width: 118px;
+}
+
+.andon-modal.andon-modal-detalhe-datas .andon-modal-table td.andon-modal-datas {
+  max-width: 118px;
+  white-space: nowrap;
+}
+
+.andon-modal-table th:nth-child(2),
+.andon-modal-table td:nth-child(2) {
+  min-width: 86px;
+  width: 86px;
+}
+
+.andon-modal-table th:nth-child(3),
+.andon-modal-table td:nth-child(3) {
+  min-width: 190px;
+  white-space: nowrap;
+}
+
+.andon-modal-table th:nth-child(4),
+.andon-modal-table td:nth-child(4) {
   min-width: 280px;
+  white-space: nowrap;
+}
+
+.andon-dias-trab-cell {
+  cursor: pointer;
+}
+
+.andon-dias-trab-btn {
+  min-width: 42px;
+  min-height: 28px;
+  border: 1px solid rgba(15, 61, 122, 0.28);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #0f3d7a;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.andon-dias-trab-btn:hover {
+  background: #eaf2ff;
 }
 
 .andon-modal-table td.andon-faixa {
@@ -738,7 +832,7 @@ body {
 }
 
 .andon-modal-controle-servico .andon-modal-table {
-  min-width: 1500px;
+  min-width: 1680px;
 }
 
 .andon-modal-controle-servico .andon-modal-table th {
@@ -753,8 +847,55 @@ body {
   text-align: center;
 }
 
-.andon-modal-controle-servico .andon-modal-table th:nth-child(4),
-.andon-modal-controle-servico .andon-modal-table td:nth-child(4) {
+.andon-modal-controle-servico .andon-modal-table th:nth-child(3),
+.andon-modal-controle-servico .andon-modal-table td:nth-child(3) {
+  min-width: 190px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.andon-modal-controle-servico .andon-modal-table th:nth-child(5),
+.andon-modal-controle-servico .andon-modal-table td:nth-child(5) {
+  min-width: 260px;
+  text-align: left;
+}
+
+.andon-modal-controle-servico.andon-modal-controle-agregado .andon-modal-table {
+  min-width: 1760px;
+}
+
+.andon-modal-controle-servico.andon-modal-controle-agregado .andon-modal-table th:first-child,
+.andon-modal-controle-servico.andon-modal-controle-agregado .andon-modal-table td:first-child {
+  min-width: 170px;
+  text-align: left;
+}
+
+.andon-modal-controle-servico.andon-modal-controle-agregado.andon-modal-detalhe-datas .andon-modal-table th:first-child,
+.andon-modal-controle-servico.andon-modal-controle-agregado.andon-modal-detalhe-datas .andon-modal-table td:first-child {
+  min-width: 95px;
+}
+
+.andon-modal-controle-servico.andon-modal-controle-agregado .andon-modal-table th:nth-child(3),
+.andon-modal-controle-servico.andon-modal-controle-agregado .andon-modal-table td:nth-child(3) {
+  min-width: 70px;
+  text-align: center;
+}
+
+.andon-modal-controle-servico.andon-modal-controle-agregado .andon-modal-table th:nth-child(4),
+.andon-modal-controle-servico.andon-modal-controle-agregado .andon-modal-table td:nth-child(4) {
+  min-width: 190px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.andon-modal-controle-servico.andon-modal-controle-agregado .andon-modal-table th:nth-child(5),
+.andon-modal-controle-servico.andon-modal-controle-agregado .andon-modal-table td:nth-child(5) {
+  min-width: 90px;
+  text-align: center;
+}
+
+.andon-modal-controle-servico.andon-modal-controle-agregado .andon-modal-table th:nth-child(6),
+.andon-modal-controle-servico.andon-modal-controle-agregado .andon-modal-table td:nth-child(6) {
   min-width: 260px;
   text-align: left;
 }
@@ -1372,6 +1513,7 @@ body {
   gap: 0.75rem;
   align-items: flex-end;
   flex-wrap: wrap;
+  margin-right: auto;
 }
 
 .header-filter-group {
@@ -1407,6 +1549,10 @@ body {
 
 .header-filter-input-wide {
   width: 150px;
+}
+
+#headerSupervisorDisplay {
+  width: 240px;
 }
 
 .header-filter-input::placeholder {
@@ -1453,6 +1599,11 @@ body {
   border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: 0.85rem;
   box-shadow: 0 14px 32px rgba(15, 23, 42, 0.14);
+}
+
+#headerMonthPopup {
+  left: auto;
+  right: 0;
 }
 
 .header-filter-popup.hidden {

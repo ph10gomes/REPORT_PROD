@@ -129,6 +129,8 @@ function mapReportCscHojeRow(dbRow) {
   const ultimoAtend = extractHHMM(ultimoAtendRaw) || String(ultimoAtendRaw || "");
   const inicioRefeicao = extractHHMM(inicioRefeicaoRaw) || String(inicioRefeicaoRaw || "");
   const terminoRefeicao = extractHHMM(terminoRefeicaoRaw) || String(terminoRefeicaoRaw || "");
+  const fimJornadaRaw = firstNonEmpty(dbRow._FIM_JORNADA_ANY, dbRow.FIM_JORNADA);
+  const fimJornada = extractHHMM(fimJornadaRaw) || String(fimJornadaRaw || "");
 
   const jornadaProd = computeJornadaProdutiva(dbRow);
   const statusJornada = computeStatusJornada(dbRow);
@@ -172,6 +174,8 @@ function mapReportCscHojeRow(dbRow) {
     INICIO_JORNADA: extractHHMM(dbRow.INICIO_JORNADA) || dbRow.INICIO_JORNADA,
     INICIO_REFEICAO: inicioRefeicao,
     TERMINO_REFEICAO: terminoRefeicao,
+    FIM_JORNADA: fimJornada,
+    "Fim Jornada": fimJornada,
     PRIMEIRO_ATENDIMENTO: extractHHMM(dbRow.PRIMEIRO_ATENDIMENTO) || dbRow.PRIMEIRO_ATENDIMENTO,
     ULTIMO_ATENDIMENTO: extractHHMM(dbRow.ULTIMO_ATENDIMENTO) || dbRow.ULTIMO_ATENDIMENTO,
 

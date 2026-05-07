@@ -411,6 +411,8 @@ def map_report_csc_hoje_row(db_row):
     ultimo_atend = extract_hhmm(ultimo_atend_raw) or str(ultimo_atend_raw or "")
     inicio_refeicao = extract_hhmm(inicio_refeicao_raw) or str(inicio_refeicao_raw or "")
     termino_refeicao = extract_hhmm(termino_refeicao_raw) or str(termino_refeicao_raw or "")
+    fim_jornada_raw = first_non_empty(db_row.get("_FIM_JORNADA_ANY"), db_row.get("FIM_JORNADA"))
+    fim_jornada = extract_hhmm(fim_jornada_raw) or str(fim_jornada_raw or "")
     jornada_prod = compute_jornada_produtiva(db_row)
     status_jornada = compute_status_jornada(db_row)
 
@@ -443,6 +445,8 @@ def map_report_csc_hoje_row(db_row):
         "INICIO_JORNADA": extract_hhmm(db_row.get("INICIO_JORNADA")) or db_row.get("INICIO_JORNADA", ""),
         "INICIO_REFEICAO": inicio_refeicao,
         "TERMINO_REFEICAO": termino_refeicao,
+        "FIM_JORNADA": fim_jornada,
+        "Fim Jornada": fim_jornada,
         "PRIMEIRO_ATENDIMENTO": extract_hhmm(db_row.get("PRIMEIRO_ATENDIMENTO")) or db_row.get("PRIMEIRO_ATENDIMENTO", ""),
         "ULTIMO_ATENDIMENTO": extract_hhmm(db_row.get("ULTIMO_ATENDIMENTO")) or db_row.get("ULTIMO_ATENDIMENTO", ""),
         "Jornada Produtiva": jornada_prod,
@@ -473,6 +477,8 @@ def compact_report_row(row):
         "INICIO_JORNADA",
         "INICIO_REFEICAO",
         "TERMINO_REFEICAO",
+        "FIM_JORNADA",
+        "Fim Jornada",
         "PRIMEIRO_ATENDIMENTO",
         "ULTIMO_ATENDIMENTO",
         "Jornada Produtiva",
@@ -863,10 +869,13 @@ def controle_servico():
         cod_equipe = request.args.get("codEquipe")
 
         date_cols = []
-        col_data_atualizacao = pick_column(columns, ["DATA_ATUALIZACAO", "DATA ATUALIZACAO", "DATA_ATUALIZAÇÃO"])
+        col_data_atualizacao = pick_column(columns, ["DATA_ATUALIZACAO", "DATA ATUALIZACAO", "DATA_ATUALIZAÇÃO", "DATA_ATUALIZACAO_D"])
         if not col_data_atualizacao:
             return jsonify({"ok": False, "error": "Coluna DATA_ATUALIZACAO nao encontrada na tabela de controle de servicos."}), 400
-        date_cols.append(col_data_atualizacao)
+        col_data_designacao = pick_column(columns, ["DATA_DESIGNACAO", "DESIGNACAO", "DATA DESIGNACAO"])
+        data_ref = str(request.args.get("dataRef", "")).strip().lower()
+        col_data_filtro = col_data_designacao if data_ref == "designacao" and col_data_designacao else col_data_atualizacao
+        date_cols.append(col_data_filtro)
 
         if data:
             add_date_filter_for_columns(data, date_cols, where, params)
@@ -874,16 +883,16 @@ def controle_servico():
 
         if request.args.get("dataInicio"):
             data_inicio = str(request.args.get("dataInicio"))[:10]
-            where.append(f"DATE(`{col_data_atualizacao}`) >= %s")
+            where.append(f"DATE(`{col_data_filtro}`) >= %s")
             params.append(data_inicio)
-            where_sem_uo.append(f"DATE(`{col_data_atualizacao}`) >= %s")
+            where_sem_uo.append(f"DATE(`{col_data_filtro}`) >= %s")
             params_sem_uo.append(data_inicio)
 
         if request.args.get("dataFim"):
             data_fim = str(request.args.get("dataFim"))[:10]
-            where.append(f"DATE(`{col_data_atualizacao}`) <= %s")
+            where.append(f"DATE(`{col_data_filtro}`) <= %s")
             params.append(data_fim)
-            where_sem_uo.append(f"DATE(`{col_data_atualizacao}`) <= %s")
+            where_sem_uo.append(f"DATE(`{col_data_filtro}`) <= %s")
             params_sem_uo.append(data_fim)
 
         col_uo = pick_column(columns, ["COD_UO", "UO"])
@@ -900,14 +909,14 @@ def controle_servico():
             params_sem_uo.append(str(cod_equipe))
 
         limit = int(request.args.get("limit", "20000"))
-        if limit < 1 or limit > 50000:
+        if limit < 1 or limit > 200000:
             raise ValueError("Parâmetro inválido: limit.")
 
         sql = f"SELECT * FROM `{table}`"
         if where:
             sql += f" WHERE {' AND '.join(where)}"
 
-        order_col = pick_column(columns, ["DATA_ATUALIZACAO", "DATA_ACIONAMENTO", "DATA_DESIGNACAO", "DATA_TERMINO_REAL", "DATA_LOCALIZACAO", "DATA", "ID", "id"])
+        order_col = col_data_filtro or pick_column(columns, ["DATA_ATUALIZACAO", "DATA_ACIONAMENTO", "DATA_DESIGNACAO", "DATA_TERMINO_REAL", "DATA_LOCALIZACAO", "DATA", "ID", "id"])
         if order_col:
             sql += f" ORDER BY `{order_col}` ASC"
 
@@ -1916,11 +1925,41 @@ def root():
     return send_from_directory(str(BASE_DIR), "login.html")
 
 
+@app.route("/login")
+def login_page():
+    return send_from_directory(str(BASE_DIR), "login.html")
+
+
+@app.route("/index")
+def index_page():
+    return send_from_directory(str(BASE_DIR), "index.html")
+
+
+@app.route("/index1")
+def index1_page():
+    return send_from_directory(str(BASE_DIR), "index1.html")
+
+
+@app.route("/frontend/jornada")
+def jornada_page():
+    return send_from_directory(str(BASE_DIR), "frontend/jornada.html")
+
+
 @app.route("/<path:path>")
 def static_files(path):
     target = BASE_DIR / path
     if target.exists() and target.is_file():
         return send_from_directory(str(BASE_DIR), path)
+
+    if path in {"login", "login.html"}:
+        return send_from_directory(str(BASE_DIR), "login.html")
+    if path in {"index", "index.html"}:
+        return send_from_directory(str(BASE_DIR), "index.html")
+    if path in {"index1", "index1.html"}:
+        return send_from_directory(str(BASE_DIR), "index1.html")
+    if path in {"frontend/jornada", "frontend/jornada.html"}:
+        return send_from_directory(str(BASE_DIR), "frontend/jornada.html")
+
     return send_from_directory(str(BASE_DIR), "index.html")
 
 

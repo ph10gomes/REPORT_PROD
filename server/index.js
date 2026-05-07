@@ -448,7 +448,15 @@ app.get("/api/controle-servico", async (req, res) => {
     if (!colDataAtualizacao) {
       return res.status(400).json({ ok: false, error: "Coluna DATA_ATUALIZACAO nao encontrada na tabela de controle de servicos." });
     }
-    dateCols.push(colDataAtualizacao);
+    const colDataDesignacao = pickCol(["DATA_DESIGNACAO", "DESIGNACAO", "DATA DESIGNACAO"]);
+    const colDataTermino = pickCol(["DATA_TERMINO_REAL", "ENCERRAMENTO", "DATA_TERMINO"]);
+    const dataRef = String(req.query.dataRef || "").trim().toLowerCase();
+    const colDataFiltro = dataRef === "designacao" && colDataDesignacao
+      ? colDataDesignacao
+      : (dataRef === "termino" || dataRef === "data_termino" || dataRef === "data_termino_real") && colDataTermino
+        ? colDataTermino
+        : colDataAtualizacao;
+    dateCols.push(colDataFiltro);
 
     if (data) {
       addDateFilterForColumns(data, dateCols, where, params);
@@ -456,16 +464,16 @@ app.get("/api/controle-servico", async (req, res) => {
     }
 
     if (req.query.dataInicio) {
-      where.push(`DATE(\`${colDataAtualizacao}\`) >= ?`);
+      where.push(`DATE(\`${colDataFiltro}\`) >= ?`);
       params.push(String(req.query.dataInicio).slice(0, 10));
-      whereSemUo.push(`DATE(\`${colDataAtualizacao}\`) >= ?`);
+      whereSemUo.push(`DATE(\`${colDataFiltro}\`) >= ?`);
       paramsSemUo.push(String(req.query.dataInicio).slice(0, 10));
     }
 
     if (req.query.dataFim) {
-      where.push(`DATE(\`${colDataAtualizacao}\`) <= ?`);
+      where.push(`DATE(\`${colDataFiltro}\`) <= ?`);
       params.push(String(req.query.dataFim).slice(0, 10));
-      whereSemUo.push(`DATE(\`${colDataAtualizacao}\`) <= ?`);
+      whereSemUo.push(`DATE(\`${colDataFiltro}\`) <= ?`);
       paramsSemUo.push(String(req.query.dataFim).slice(0, 10));
     }
 
@@ -485,14 +493,14 @@ app.get("/api/controle-servico", async (req, res) => {
     }
 
     const limitRaw = req.query.limit ?? "20000";
-    const limit = Math.max(1, Math.min(50000, Number(limitRaw)));
+    const limit = Math.max(1, Math.min(200000, Number(limitRaw)));
     if (!Number.isFinite(limit)) {
       return res.status(400).json({ ok: false, error: "Parametro invalido: limit." });
     }
 
     let sql = `SELECT * FROM \`${table}\``;
     if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
-    const orderCol = pickCol(["DATA_ATUALIZACAO", "DATA_ATUALIZACAO_D", "DATA_ACIONAMENTO", "DATA_DESIGNACAO", "DATA_TERMINO_REAL", "DATA_LOCALIZACAO", "DATA", "ID", "id"]);
+    const orderCol = colDataFiltro || pickCol(["DATA_ATUALIZACAO", "DATA_ATUALIZACAO_D", "DATA_ACIONAMENTO", "DATA_DESIGNACAO", "DATA_TERMINO_REAL", "DATA_LOCALIZACAO", "DATA", "ID", "id"]);
     if (orderCol) sql += ` ORDER BY \`${orderCol}\` ASC`;
     sql += " LIMIT ?";
     params.push(limit);
