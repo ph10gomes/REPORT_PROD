@@ -193,10 +193,16 @@ let andonLoteProdEquipesLoadedKey = '';
 let andonLoteProdEquipesLoadingPromise = null;
 let andonAcordosBase = {};
 let andonFiltroCache = { key: '', values: {} };
+let andonDashboardUpdateTimer = null;
 const MODAL_PAGE_SIZE = 300;
 let modalTabelaEstado = null;
 let modalDetalheEquipesDias = new Map();
 let modalEquipesVoltarContexto = null;
+let modalPerformanceEstado = { lista: [], rows: [], controleRows: null, contexto: {}, busca: '' };
+let modalLoteEstado = { lista: [], busca: '', options: {}, habilitarDetalheDias: true };
+let modalFiltrosExcelEstado = { assinatura: '', filtros: {} };
+let modalFiltrosExcelRestaurar = null;
+let modalJustificadasAnaliseEstado = { rows: [], grupoAtivo: '', descricaoAtiva: '', busca: '', historico: new Map() };
 
 function limparCacheAndon() {
   andonFiltroCache = { key: '', values: {} };
@@ -228,7 +234,11 @@ function compararFaixaDiaDesc(a, b) {
 function toNumberSafe(value) {
   if (typeof value === 'number') return value;
   if (value == null || value === '') return 0;
-  return parseFloat(String(value).trim().replace(/\./g, '').replace(',', '.')) || 0;
+  const texto = String(value).trim();
+  if (texto.includes(',')) {
+    return parseFloat(texto.replace(/\./g, '').replace(',', '.')) || 0;
+  }
+  return parseFloat(texto) || 0;
 }
 
 function formatInt(value) {
@@ -253,7 +263,11 @@ function formatNumber3Scale100(value) {
   return new Intl.NumberFormat('pt-BR', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3
-  }).format(Number(value || 0) / 100);
+  }).format(Number(value || 0));
+}
+
+function normalizarProducaoLoteParaMeta(value) {
+  return Number(value || 0);
 }
 
 function formatPercent(value) {
@@ -305,6 +319,47 @@ function textoContemMtami(valor) {
 
 function nomeEhClusterMtami(...candidatos) {
   return candidatos.some((valor) => textoContemMtami(valor));
+}
+
+const META_PADRAO_POR_PREFIXO_EQUIPE = {
+  MFAMI: 1.3,
+  MFCA: 1.7,
+  MFIN: 0.9,
+  MFLG: 0.85,
+  MFPLD: 0.9,
+  MFPLT: 0.9,
+  MFPMG: 0.7,
+  MTAMI: 0.75,
+  MTCT: 0.4,
+  MTIN: 0.4,
+  MTPL: 0.4,
+  MTRL: 0.4,
+  MTTOP20: 0.4,
+  MTVP: 0.25
+};
+
+function obterPrefixoNomenclaturaEquipe(nome) {
+  const texto = String(nome || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+  const match = texto.match(/(?:^|[-\s])((?:MF|MT)[A-Z0-9]+)(?:[-\s]|$)/);
+  return match ? match[1].trim() : '';
+}
+
+function obterMetaPadraoPorNomenclatura(...candidatos) {
+  for (const candidato of candidatos) {
+    const prefixo = obterPrefixoNomenclaturaEquipe(candidato);
+    if (prefixo && META_PADRAO_POR_PREFIXO_EQUIPE[prefixo]) {
+      return ajustarMetaClusterMtamiAndon(META_PADRAO_POR_PREFIXO_EQUIPE[prefixo], candidato);
+    }
+  }
+  return 0;
+}
+
+function ajustarMetaComFallbackNomenclatura(meta, ...candidatos) {
+  const metaAjustada = ajustarMetaClusterMtamiAndon(meta, ...candidatos);
+  return Number(metaAjustada || 0) || obterMetaPadraoPorNomenclatura(...candidatos);
 }
 
 function ajustarMetaClusterMtamiAndon(meta, ...candidatos) {
@@ -518,6 +573,10 @@ function obterChavePeriodoFiltroAndon() {
   return `${periodo.inicio || 'ini'}:${periodo.fim || 'fim'}`;
 }
 
+function filtroPeriodoMultiDiaAtivo() {
+  return !headerSelectedDate && (headerSelectedWeeks.length > 0 || Boolean(headerSelectedMonth));
+}
+
 function obterChaveCacheFiltroAndon() {
   const uo = String(headerSelectedUo || '').replace(/[^\d]/g, '') || 'todas';
   const supervisor = normalizarTextoFiltroModal(headerSelectedSupervisor || '') || 'todos';
@@ -549,6 +608,44 @@ function obterCacheFiltroAndon() {
     andonFiltroCache = { key, values: {} };
   }
   return andonFiltroCache.values;
+}
+
+function agruparRowsPorCodigo(rows = [], obterCodigo) {
+  const mapa = new Map();
+  rows.forEach((row) => {
+    const codigo = String(obterCodigo(row) || '').trim();
+    if (!codigo) return;
+    if (!mapa.has(codigo)) mapa.set(codigo, []);
+    mapa.get(codigo).push(row);
+  });
+  return mapa;
+}
+
+function obterMapaReportPorCodigoAndon() {
+  const cache = obterCacheFiltroAndon();
+  if (!cache.reportPorCodigo) {
+    cache.reportPorCodigo = agruparRowsPorCodigo(filtrarReportRowsAndon(), obterCodigoEquipeLinha);
+  }
+  return cache.reportPorCodigo;
+}
+
+function obterMapaControlePorCodigoAndon() {
+  const cache = obterCacheFiltroAndon();
+  if (!cache.controlePorCodigo) {
+    cache.controlePorCodigo = agruparRowsPorCodigo(
+      filtrarControleRowsAndon(),
+      (row) => obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE'])
+    );
+  }
+  return cache.controlePorCodigo;
+}
+
+function obterMapaLoteEquipesPorCodigoAndon() {
+  const cache = obterCacheFiltroAndon();
+  if (!cache.loteEquipesPorCodigo) {
+    cache.loteEquipesPorCodigo = agruparRowsPorCodigo(filtrarLoteProdEquipesRowsAndon(), obterCodigoEquipeLote);
+  }
+  return cache.loteEquipesPorCodigo;
 }
 
 async function carregarLoteProdEquipesAndon() {
@@ -734,8 +831,132 @@ function obterCodigoEquipeLote(row) {
   return String(obterValorPrimeiro(row, ['COD_EQUIPE', 'COD_EQUIPE_WM', 'NUM_EQUIPE']) || '').trim();
 }
 
+function nomeEquipeContemAdm(nome) {
+  const texto = String(nome || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+  return /(^|[^A-Z0-9])ADM([^A-Z0-9]|$)/.test(texto);
+}
+
+function itemEquipeDeveAparecerModal(item = {}) {
+  return !nomeEquipeContemAdm(item.equipe || item.Equipe || item.EQUIPE || item.NOME_EQUIPE || item.Nome || item.NOME || '');
+}
+
 function obterCodigosReportRows(rows = []) {
   return new Set(rows.map((row) => String(obterCodigoEquipeLinha(row) || '').trim()).filter(Boolean));
+}
+
+function linhaReportPossuiInicioJornada(row = {}) {
+  const inicio = obterHoraTexto(obterValorPrimeiro(row, [
+    'INICIO_JORNADA',
+    'Inicio Jornada',
+    'Início Jornada',
+    'InÃ­cio Jornada'
+  ]));
+  return Number.isFinite(horaParaMinutos(inicio));
+}
+
+function filtrarReportRowsComInicioJornada(rows = []) {
+  const codigosComInicio = new Set(
+    rows
+      .filter(linhaReportPossuiInicioJornada)
+      .map((row) => String(obterCodigoEquipeLinha(row) || '').trim())
+      .filter(Boolean)
+  );
+  if (!codigosComInicio.size) return [];
+  return rows.filter((row) => codigosComInicio.has(String(obterCodigoEquipeLinha(row) || '').trim()));
+}
+
+function filtrarReportRowsPorDiasComInicioJornada(rows = []) {
+  const chavesComInicio = new Set(
+    rows
+      .filter(linhaReportPossuiInicioJornada)
+      .map((row) => {
+        const codigo = String(obterCodigoEquipeLinha(row) || '').trim();
+        const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA']));
+        return codigo && dataIso ? `${codigo}__${dataIso}` : '';
+      })
+      .filter(Boolean)
+  );
+  if (!chavesComInicio.size) return [];
+  return rows.filter((row) => {
+    const codigo = String(obterCodigoEquipeLinha(row) || '').trim();
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA']));
+    return codigo && dataIso && chavesComInicio.has(`${codigo}__${dataIso}`);
+  });
+}
+
+function obterTotalEquipesComInicioJornada(rows = []) {
+  return obterCodigosReportRows(filtrarReportRowsComInicioJornada(rows)).size;
+}
+
+function contarEquipesDiasComInicioJornada(rows = []) {
+  const chaves = new Set();
+  rows.forEach((row) => {
+    if (!linhaReportPossuiInicioJornada(row)) return;
+    const codigo = String(obterCodigoEquipeLinha(row) || '').trim();
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA']));
+    if (codigo && dataIso) chaves.add(`${codigo}__${dataIso}`);
+  });
+  return chaves.size;
+}
+
+function somarDiasTrabalhadosEquipes(listaEquipes = []) {
+  return listaEquipes.reduce((acc, item) => acc + Number(item.diasTrabalhados || 0), 0);
+}
+
+function obterEquipesDBaseTotalComInicioJornada(rows = []) {
+  return obterEquipesDBaseTotal(filtrarReportRowsComInicioJornada(rows));
+}
+
+function obterMetricasReportPorEquipe(rows = []) {
+  const porEquipeDia = new Map();
+
+  rows.forEach((row) => {
+    const codigo = obterCodigoEquipeLinha(row);
+    if (!codigo) return;
+
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA'])) || 'sem-data';
+    const chaveDia = `${codigo}__${dataIso}`;
+    const atual = porEquipeDia.get(chaveDia) || {
+      codigo,
+      datas: new Set(),
+      metaDia: 0,
+      prodDia: 0
+    };
+
+    atual.datas.add(dataIso);
+    atual.metaDia = Math.max(
+      atual.metaDia,
+      ajustarMetaComFallbackNomenclatura(
+        toNumberSafe(obterValorPrimeiro(row, ['Meta Prog.', 'META PROG', 'META_PROG'])),
+        obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']),
+        obterValorPrimeiro(row, ['Nome', 'NOME_EQUIPE', 'NOME'])
+      )
+    );
+    atual.prodDia = Math.max(
+      atual.prodDia,
+      toNumberSafe(obterValorPrimeiro(row, ['Produção', 'PRODUÇÃO', 'ProduÃ§Ã£o', 'PRODUÃ‡ÃƒO', 'PRODUCAO']))
+    );
+    porEquipeDia.set(chaveDia, atual);
+  });
+
+  const porEquipe = new Map();
+  porEquipeDia.forEach((dia) => {
+    const atual = porEquipe.get(dia.codigo) || {
+      codigo: dia.codigo,
+      datas: new Set(),
+      metaDia: 0,
+      prodDia: 0
+    };
+    dia.datas.forEach((data) => atual.datas.add(data));
+    atual.metaDia += Number(dia.metaDia || 0);
+    atual.prodDia += Number(dia.prodDia || 0);
+    porEquipe.set(dia.codigo, atual);
+  });
+
+  return porEquipe;
 }
 
 function filtrarLoteProdPorCodigos(rows = [], codigos = new Set()) {
@@ -746,26 +967,36 @@ function filtrarLoteProdPorCodigos(rows = [], codigos = new Set()) {
 function calcularClassificacaoLoteProdEquipes(rows = []) {
   const totalMeta = rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['META', 'Meta'])), 0);
   const totalProducao = rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['VALOR_US', 'Valor_US', 'valor_us'])), 0);
-  return totalMeta > 0 ? formatClassificacao((totalProducao / totalMeta) * 100) : '--';
+  return totalMeta > 0 ? formatClassificacao((normalizarProducaoLoteParaMeta(totalProducao) / totalMeta) * 100) : '--';
 }
 
 function obterEquipesDBaseLoteProd(rows = []) {
-  const mapa = new Map();
+  const porEquipeDia = new Map();
 
   rows.forEach((row) => {
     const codigo = obterCodigoEquipeLote(row);
     if (!codigo) return;
 
-    const atual = mapa.get(codigo) || { metaDia: 0, prodDia: 0 };
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data'])) || 'sem-data';
+    const chaveDia = `${codigo}__${dataIso}`;
+    const atual = porEquipeDia.get(chaveDia) || { codigo, metaDia: 0, prodDia: 0 };
     atual.metaDia = Math.max(atual.metaDia, toNumberSafe(obterValorPrimeiro(row, ['META', 'Meta'])));
     atual.prodDia = Math.max(atual.prodDia, toNumberSafe(obterValorPrimeiro(row, ['VALOR_US', 'Valor_US', 'valor_us'])));
-    mapa.set(codigo, atual);
+    porEquipeDia.set(chaveDia, atual);
+  });
+
+  const mapa = new Map();
+  porEquipeDia.forEach((dia) => {
+    const atual = mapa.get(dia.codigo) || { metaDia: 0, prodDia: 0 };
+    atual.metaDia += Number(dia.metaDia || 0);
+    atual.prodDia += Number(dia.prodDia || 0);
+    mapa.set(dia.codigo, atual);
   });
 
   const equipesD = new Set();
   mapa.forEach((item, codigo) => {
     const percentualDia = Number(item.metaDia || 0) > 0
-      ? (Number(item.prodDia || 0) / Number(item.metaDia || 0)) * 100
+      ? (normalizarProducaoLoteParaMeta(item.prodDia) / Number(item.metaDia || 0)) * 100
       : 0;
     if (classificarFaixa(percentualDia) === 'D') equipesD.add(String(codigo));
   });
@@ -787,11 +1018,11 @@ function calcularResumoLoteProd(rows = []) {
   const baseEquipes = obterEquipesDBaseLoteProd(rowsEquipes);
   const totalMeta = baseEquipes.totalMetaDia || rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['META', 'Meta'])), 0);
   const totalProducao = baseEquipes.totalProdDia || rows.reduce((acc, row) => acc + toNumberSafe(obterValorPrimeiro(row, ['VALOR_US', 'Valor_US', 'valor_us'])), 0);
-  const percentual = totalMeta > 0 ? (totalProducao / totalMeta) * 100 : NaN;
+  const percentual = totalMeta > 0 ? (normalizarProducaoLoteParaMeta(totalProducao) / totalMeta) * 100 : NaN;
 
   return {
     classificacao: formatClassificacao(percentual),
-    equipesD: baseEquipes.equipesD.size
+    equipesD: contarEquipesDLoteProdVisiveis()
   };
 }
 
@@ -819,10 +1050,11 @@ function obterMapaNomesEquipesReport(rows = filtrarReportRowsAndon()) {
   return mapa;
 }
 
-function renderCabecalhoModalEquipesPadrao() {
+function renderCabecalhoModalEquipesPadrao(options = {}) {
   removerResumoControleServicoModal();
   const tr = document.querySelector('#equipesModal thead tr');
   if (!tr) return;
+  const comHistorico = Boolean(options.comHistorico);
   tr.innerHTML = `
     <th>Datas</th>
     <th>Dias Trab.</th>
@@ -839,6 +1071,7 @@ function renderCabecalhoModalEquipesPadrao() {
     <th>Últ. Atendimento</th>
     <th>Fim Jornada</th>
     <th>Jornada Produtiva</th>
+    ${comHistorico ? '<th>Hist.</th>' : ''}
   `;
 }
 
@@ -883,11 +1116,23 @@ function renderCabecalhoModalEquipesDLoteProd() {
 function montarLinhasModalEquipesLoteProd(rows = [], reportRowsModal = filtrarReportRowsAndon(), options = {}) {
   const agruparPorData = Boolean(options.agruparPorData);
   const obterChaveEquipe = (codigo, dataIso = '') => agruparPorData && dataIso ? `${codigo}__${dataIso}` : codigo;
+  const linhasWm = montarLinhasModalEquipes(reportRowsModal, 'todas', filtrarControleRowsAndon(), { agruparPorData });
   const mapaWm = new Map(
-    montarLinhasModalEquipes(reportRowsModal, 'todas', filtrarControleRowsAndon(), { agruparPorData })
-      .map((item) => [String(item.codigo || '').trim(), item])
+    linhasWm
+      .map((item) => {
+        const codigo = String(item.codigo || '').trim();
+        const dataIso = normalizarDataIso(item.datas && item.datas[0]);
+        return [obterChaveEquipe(codigo, dataIso), item];
+      })
       .filter(([codigo]) => Boolean(codigo))
   );
+  const mapaMetaFixaWm = new Map();
+  linhasWm.forEach((item) => {
+    const codigo = String(item.codigo || '').trim();
+    const meta = Number(item.metaDia || 0);
+    if (!codigo || !Number.isFinite(meta) || meta <= 0) return;
+    mapaMetaFixaWm.set(codigo, Math.max(Number(mapaMetaFixaWm.get(codigo) || 0), meta));
+  });
 
   const mapaSupervisor = new Map();
   reportRowsModal.forEach((reportRow) => {
@@ -940,27 +1185,35 @@ function montarLinhasModalEquipesLoteProd(rows = [], reportRowsModal = filtrarRe
   });
 
   return Array.from(mapa.values()).map((item) => {
+    const codigoItem = String(item.codigo || '').trim();
     const dataItemIso = normalizarDataIso(item.datas && item.datas[0]);
-    const wm = mapaWm.get(obterChaveEquipe(String(item.codigo || '').trim(), dataItemIso))
-      || mapaWm.get(String(item.codigo || '').trim())
+    const wm = mapaWm.get(obterChaveEquipe(codigoItem, dataItemIso))
+      || mapaWm.get(codigoItem)
       || {};
-    const metaWm = Number(wm.metaDia || 0);
+    const metaWm =
+      Number(wm.metaDia || 0) ||
+      Number(mapaMetaFixaWm.get(codigoItem) || 0) ||
+      obterMetaPadraoPorNomenclatura(item.equipe, wm.equipe);
     const producaoWm = Number(wm.prodDia || 0);
     const percentualWm = metaWm > 0 ? (producaoWm / metaWm) * 100 : 0;
-    const percentualLote = Number(item.metaDia || 0) > 0
-      ? (Number(item.prodDia || 0) / Number(item.metaDia || 0)) * 100
+    const metaReferenciaLote = Number(item.metaDia || 0) || metaWm;
+    const prodLoteNaEscalaMeta = normalizarProducaoLoteParaMeta(item.prodDia);
+    const percentualLote = metaReferenciaLote > 0
+      ? (prodLoteNaEscalaMeta / metaReferenciaLote) * 100
       : 0;
 
     return {
       ...item,
       data: formatarSequenciaDatasAndon(item.datas),
       diasTrabalhados: contarDiasTrabalhadosAndon(item.datas),
+      _temWm: Boolean(wm.codigo),
       metaWm,
       producaoWm,
       percentualWm,
       faixaWm: wm.faixaDia || classificarFaixa(percentualWm),
+      metaDia: metaReferenciaLote,
       percentualLote,
-      faixaLote: item.faixaLote || classificarFaixa(percentualLote),
+      faixaLote: classificarFaixa(percentualLote),
       inicioJornada: wm.inicioJornada || item.inicioJornada || '-',
       inicioRefeicao: wm.inicioRefeicao || item.inicioRefeicao || '-',
       terminoRefeicao: wm.terminoRefeicao || item.terminoRefeicao || '-',
@@ -970,7 +1223,58 @@ function montarLinhasModalEquipesLoteProd(rows = [], reportRowsModal = filtrarRe
       jornadaProdutiva: wm.jornadaProdutiva || item.jornadaProdutiva || '-',
       comparativo: item.comparativo || (wm.codigo ? 'WM E LOTE' : 'SOMENTE LOTE')
     };
-  }).sort((a, b) => {
+  }).filter(itemEquipeDeveAparecerModal).map((item) => {
+    if (agruparPorData || !filtroPeriodoMultiDiaAtivo() || Number(item.diasTrabalhados || 0) <= 1) {
+      return item;
+    }
+
+    const codigo = String(item.codigo || '').trim();
+    const datas = new Set((item.datas || []).map((data) => normalizarDataIso(data)).filter(Boolean));
+    if (!codigo || !datas.size) return item;
+
+    const rowsEquipe = rows.filter((row) => {
+      const codigoRow = obterCodigoEquipeLote(row);
+      const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+      return codigoRow === codigo && datas.has(dataIso);
+    });
+    const reportRowsEquipe = reportRowsModal.filter((row) => {
+      const codigoRow = String(obterCodigoEquipeLinha(row) || '').trim();
+      const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+      return codigoRow === codigo && datas.has(dataIso);
+    });
+    const linhasDias = montarLinhasModalEquipesLoteProd(rowsEquipe, reportRowsEquipe, { agruparPorData: true });
+    if (!linhasDias.length) return item;
+
+    const metaWmMedia = mediaNumericaAndon(linhasDias.map((row) => Number(row.metaWm || 0)).filter((valor) => Number.isFinite(valor) && valor > 0));
+    const prodWmMedia = mediaNumericaAndon(linhasDias.map((row) => Number(row.producaoWm || 0)).filter((valor) => Number.isFinite(valor)));
+    const metaLoteMedia = mediaNumericaAndon(linhasDias.map((row) => Number(row.metaDia || 0)).filter((valor) => Number.isFinite(valor) && valor > 0));
+    const prodLoteMedia = mediaNumericaAndon(linhasDias.map((row) => Number(row.prodDia || 0)).filter((valor) => Number.isFinite(valor)));
+    const percentualWm = Number.isFinite(metaWmMedia) && metaWmMedia > 0 && Number.isFinite(prodWmMedia)
+      ? (prodWmMedia / metaWmMedia) * 100
+      : 0;
+    const percentualLote = Number.isFinite(metaLoteMedia) && metaLoteMedia > 0 && Number.isFinite(prodLoteMedia)
+      ? (normalizarProducaoLoteParaMeta(prodLoteMedia) / metaLoteMedia) * 100
+      : 0;
+
+    return {
+      ...item,
+      metaWm: Number.isFinite(metaWmMedia) ? metaWmMedia : 0,
+      producaoWm: Number.isFinite(prodWmMedia) ? prodWmMedia : 0,
+      percentualWm,
+      faixaWm: classificarFaixa(percentualWm),
+      metaDia: Number.isFinite(metaLoteMedia) ? metaLoteMedia : 0,
+      prodDia: Number.isFinite(prodLoteMedia) ? prodLoteMedia : 0,
+      percentualLote,
+      faixaLote: classificarFaixa(percentualLote),
+      inicioJornada: formatarMediaHoraModalEquipes(linhasDias, 'inicioJornada'),
+      inicioRefeicao: formatarMediaHoraModalEquipes(linhasDias, 'inicioRefeicao'),
+      terminoRefeicao: formatarMediaHoraModalEquipes(linhasDias, 'terminoRefeicao'),
+      primeiroAtendimento: formatarMediaHoraModalEquipes(linhasDias, 'primeiroAtendimento'),
+      ultimoAtendimento: formatarMediaHoraModalEquipes(linhasDias, 'ultimoAtendimento'),
+      fimJornada: formatarMediaHoraModalEquipes(linhasDias, 'fimJornada'),
+      jornadaProdutiva: formatarMediaHoraModalEquipes(linhasDias, 'jornadaProdutiva')
+    };
+  }).filter(itemEquipeDeveAparecerModal).sort((a, b) => {
     const dataA = normalizarDataIso(a.datas && a.datas[0]);
     const dataB = normalizarDataIso(b.datas && b.datas[0]);
     if (agruparPorData && dataA !== dataB) return dataA.localeCompare(dataB);
@@ -1046,7 +1350,7 @@ function abrirModalEquipesDLoteProd(options = {}) {
         <tr>
           <td class="andon-modal-datas" title="${item.data || '-'}">${item.data || '-'}</td>
           <td class="${item.detalheDiasId && Number(item.diasTrabalhados || 0) > 0 ? 'andon-dias-trab-cell' : ''}" data-dias-id="${item.detalheDiasId || ''}">
-            ${habilitarDetalheDias && item.detalheDiasId && Number(item.diasTrabalhados || 0) > 0
+            ${modalLoteEstado.habilitarDetalheDias && item.detalheDiasId && Number(item.diasTrabalhados || 0) > 0
               ? `<button class="andon-dias-trab-btn" type="button" data-dias-id="${item.detalheDiasId}">${formatInt(item.diasTrabalhados || 0)}</button>`
               : formatInt(item.diasTrabalhados || 0)}
           </td>
@@ -1073,6 +1377,7 @@ function abrirModalEquipesDLoteProd(options = {}) {
     `<tr><td colspan="19" class="andon-modal-empty">Nenhuma equipe${somenteD ? ' D' : ''} encontrada no lote produtivo.</td></tr>`
   );
   renderizarRodapeModalLoteProd(lista);
+  restaurarFiltrosModalQuandoPronto(options.modalFiltros || null);
 
   equipesModal.classList.remove('hidden');
 }
@@ -1115,6 +1420,8 @@ function renderCabecalhoModalJornadaOcorrencia(tipo = '') {
 
 function renderCabecalhoModalGenerico(colunas = []) {
   removerResumoControleServicoModal();
+  removerAnaliseJustificadasModal();
+  configurarBotaoAnaliseJustificadas(false);
   const tr = document.querySelector('#equipesModal thead tr');
   if (!tr) return;
   tr.innerHTML = colunas.map((coluna, index) => `
@@ -1123,9 +1430,7 @@ function renderCabecalhoModalGenerico(colunas = []) {
         <span>${coluna.label}</span>
         <span class="andon-modal-sort-icon">↕</span>
       </button>
-      <select class="andon-modal-filter-select" data-col="${index}" title="Filtrar coluna">
-        <option value="">Todos</option>
-      </select>
+      <button type="button" class="andon-modal-filter-btn" data-col="${index}" title="Filtrar coluna">▾</button>
     </th>
   `).join('');
 }
@@ -1136,6 +1441,15 @@ function normalizarTextoFiltroModal(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .toUpperCase()
     .trim();
+}
+
+function escaparHtmlModal(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function obterLinhasDadosModal() {
@@ -1163,11 +1477,11 @@ function renderizarLinhaModal(row, columns) {
 
 function obterRowsFiltradasModal() {
   if (!modalTabelaEstado) return [];
-  const { rows, columns, filtros } = modalTabelaEstado;
+  const { rows, columns } = modalTabelaEstado;
   return rows.filter((row) => columns.every((coluna, index) => {
-    const filtro = filtros[index];
-    if (!filtro) return true;
-    return normalizarTextoFiltroModal(obterValorCelulaModal(row, coluna)) === filtro;
+    const filtro = modalFiltrosExcelEstado.filtros[index];
+    if (!filtro || !filtro.length) return true;
+    return filtro.includes(normalizarTextoFiltroModal(obterValorCelulaModal(row, coluna)));
   }));
 }
 
@@ -1208,22 +1522,21 @@ function renderizarPaginaModalEstado() {
 
 function aplicarFiltrosModalAtual() {
   if (modalTabelaEstado) {
-    modalTabelaEstado.filtros = Array.from(document.querySelectorAll('#equipesModal .andon-modal-filter-select'))
-      .map((select) => select.value || '');
     modalTabelaEstado.page = 1;
     renderizarPaginaModalEstado();
+    atualizarEstadoBotoesFiltroModal();
     return;
   }
-  const filtros = Array.from(document.querySelectorAll('#equipesModal .andon-modal-filter-select'))
-    .map((input) => normalizarTextoFiltroModal(input.value));
   obterLinhasDadosModal().forEach((tr) => {
-    const visivel = filtros.every((filtro, index) => {
-      if (!filtro) return true;
+    const visivel = Array.from(tr.children).every((td, index) => {
+      const filtro = modalFiltrosExcelEstado.filtros[index];
+      if (!filtro || !filtro.length) return true;
       const texto = normalizarTextoFiltroModal(tr.children[index]?.textContent || '');
-      return texto === filtro;
+      return filtro.includes(texto);
     });
     tr.classList.toggle('andon-modal-row-hidden', !visivel);
   });
+  atualizarEstadoBotoesFiltroModal();
 }
 
 function valorOrdenacaoModal(texto) {
@@ -1276,39 +1589,128 @@ function ordenarModalPorColuna(index) {
   aplicarFiltrosModalAtual();
 }
 
-function preencherListasFiltroModal() {
-  document.querySelectorAll('#equipesModal .andon-modal-filter-select').forEach((select) => {
-    const index = Number(select.dataset.col || 0);
-    const valorAtual = select.value;
-    const valores = new Map();
-    if (modalTabelaEstado) {
-      const coluna = modalTabelaEstado.columns[index];
-      for (const row of modalTabelaEstado.rows) {
-        const texto = obterValorCelulaModal(row, coluna).trim();
-        if (!texto) continue;
-        const chave = normalizarTextoFiltroModal(texto);
-        if (!valores.has(chave)) valores.set(chave, texto);
-        if (valores.size >= 300) break;
-      }
-    } else {
-      obterLinhasDadosModal().forEach((tr) => {
-        const texto = String(tr.children[index]?.textContent || '').trim();
-        if (!texto) return;
-        const chave = normalizarTextoFiltroModal(texto);
-        if (!valores.has(chave)) valores.set(chave, texto);
-      });
+function obterAssinaturaCabecalhoModal() {
+  return Array.from(document.querySelectorAll('#equipesModal .andon-modal-table thead tr:first-child th'))
+    .map((th) => normalizarTextoFiltroModal(th.querySelector('.andon-modal-sort span:first-child')?.textContent || th.textContent || ''))
+    .join('|');
+}
+
+function obterValoresFiltroColunaModal(index) {
+  const valores = new Map();
+  if (modalTabelaEstado) {
+    const coluna = modalTabelaEstado.columns[index];
+    for (const row of modalTabelaEstado.rows) {
+      const texto = obterValorCelulaModal(row, coluna).trim() || '-';
+      const chave = normalizarTextoFiltroModal(texto);
+      if (!valores.has(chave)) valores.set(chave, texto);
     }
+  } else {
+    obterLinhasDadosModal().forEach((tr) => {
+      const texto = String(tr.children[index]?.textContent || '').trim() || '-';
+      const chave = normalizarTextoFiltroModal(texto);
+      if (!valores.has(chave)) valores.set(chave, texto);
+    });
+  }
+  return Array.from(valores.entries())
+    .sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'pt-BR', { numeric: true, sensitivity: 'base' }));
+}
 
-    const ordenados = Array.from(valores.entries())
-      .sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'pt-BR', { numeric: true, sensitivity: 'base' }))
-      .slice(0, 300);
+function renderizarOpcoesFiltroMenuModal(menu, termo = '') {
+  const lista = menu.querySelector('.andon-modal-filter-options');
+  if (!lista) return;
+  const busca = normalizarTextoFiltroModal(termo);
+  const valores = JSON.parse(menu.dataset.valores || '[]');
+  const filtroAtual = modalFiltrosExcelEstado.filtros[Number(menu.dataset.col || 0)] || [];
+  const selecionados = new Set(filtroAtual.length ? filtroAtual : valores.map(([chave]) => chave));
+  const filtrados = valores.filter(([chave, texto]) => !busca || chave.includes(busca) || normalizarTextoFiltroModal(texto).includes(busca));
+  lista.innerHTML = filtrados.length
+    ? filtrados.map(([chave, texto]) => `
+        <label class="andon-modal-filter-option">
+          <input type="checkbox" value="${escaparHtmlModal(chave)}" ${selecionados.has(chave) ? 'checked' : ''}>
+          <span>${escaparHtmlModal(texto)}</span>
+        </label>
+      `).join('')
+    : '<div class="andon-modal-filter-empty">Nenhum valor encontrado</div>';
+}
 
-    select.innerHTML = '<option value="">Todos</option>' + ordenados
-      .map(([chave, texto]) => `<option value="${chave}">${texto}</option>`)
-      .join('');
-
-    if (valorAtual && valores.has(valorAtual)) select.value = valorAtual;
+function fecharMenusFiltroModal() {
+  document.querySelectorAll('#equipesModal .andon-modal-filter-menu').forEach((menu) => {
+    menu.classList.add('hidden');
   });
+}
+
+function posicionarMenuFiltroModal(menu, botao) {
+  if (!menu || !botao) return;
+  const rect = botao.getBoundingClientRect();
+  const margem = 12;
+  const largura = Math.min(290, window.innerWidth - (margem * 2));
+  const left = Math.min(
+    Math.max(margem, rect.right - largura),
+    window.innerWidth - largura - margem
+  );
+  const top = Math.min(rect.bottom + 8, window.innerHeight - 120);
+  menu.style.width = `${largura}px`;
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function atualizarEstadoBotoesFiltroModal() {
+  document.querySelectorAll('#equipesModal .andon-modal-filter-btn').forEach((btn) => {
+    const index = Number(btn.dataset.col || 0);
+    btn.classList.toggle('ativo', Boolean(modalFiltrosExcelEstado.filtros[index]?.length));
+  });
+}
+
+function aplicarFiltroMenuModal(menu) {
+  const index = Number(menu.dataset.col || 0);
+  const valores = JSON.parse(menu.dataset.valores || '[]').map(([chave]) => chave);
+  const marcados = Array.from(menu.querySelectorAll('.andon-modal-filter-option input:checked'))
+    .map((input) => input.value);
+  if (!marcados.length || marcados.length === valores.length) {
+    delete modalFiltrosExcelEstado.filtros[index];
+  } else {
+    modalFiltrosExcelEstado.filtros[index] = marcados;
+  }
+  fecharMenusFiltroModal();
+  aplicarFiltrosModalAtual();
+}
+
+function capturarFiltrosModalAtual() {
+  return {
+    assinatura: obterAssinaturaCabecalhoModal(),
+    filtros: JSON.parse(JSON.stringify(modalFiltrosExcelEstado.filtros || {}))
+  };
+}
+
+function restaurarFiltrosModalQuandoPronto(estado) {
+  if (!estado || !estado.filtros) return;
+  modalFiltrosExcelRestaurar = estado;
+  setTimeout(ativarFiltrosOrdenacaoModal, 0);
+}
+
+function prepararEstadoFiltroModal() {
+  const assinatura = obterAssinaturaCabecalhoModal();
+  if (modalFiltrosExcelRestaurar) {
+    modalFiltrosExcelEstado = {
+      assinatura,
+      filtros: JSON.parse(JSON.stringify(modalFiltrosExcelRestaurar.filtros || {}))
+    };
+    modalFiltrosExcelRestaurar = null;
+    return;
+  }
+  if (modalFiltrosExcelEstado.assinatura !== assinatura) {
+    modalFiltrosExcelEstado = { assinatura, filtros: {} };
+  }
+}
+
+function preencherMenusFiltroModal() {
+  document.querySelectorAll('#equipesModal .andon-modal-filter-menu').forEach((menu) => {
+    const index = Number(menu.dataset.col || 0);
+    const valores = obterValoresFiltroColunaModal(index);
+    menu.dataset.valores = JSON.stringify(valores);
+    renderizarOpcoesFiltroMenuModal(menu, menu.querySelector('.andon-modal-filter-search')?.value || '');
+  });
+  atualizarEstadoBotoesFiltroModal();
 }
 
 function renderizarModalTabelaPaginada(rows = [], columns = [], empty = 'Nenhum registro encontrado.') {
@@ -1326,26 +1728,51 @@ function renderizarModalTabelaPaginada(rows = [], columns = [], empty = 'Nenhum 
 
 function ativarFiltrosOrdenacaoModal() {
   const ths = Array.from(document.querySelectorAll('#equipesModal .andon-modal-table thead tr:first-child th'));
+  prepararEstadoFiltroModal();
   ths.forEach((th, index) => {
-    if (th.querySelector('.andon-modal-filter-select')) return;
+    if (th.querySelector('.andon-modal-filter-btn')) return;
     const label = th.textContent.trim() || `Coluna ${index + 1}`;
     th.innerHTML = `
       <button type="button" class="andon-modal-sort" data-col="${index}">
         <span>${label}</span>
         <span class="andon-modal-sort-icon">↕</span>
       </button>
-      <select class="andon-modal-filter-select" data-col="${index}" title="Filtrar coluna">
-        <option value="">Todos</option>
-      </select>
+      <button type="button" class="andon-modal-filter-btn" data-col="${index}" title="Filtrar coluna">▾</button>
     `;
   });
-  preencherListasFiltroModal();
-  document.querySelectorAll('#equipesModal .andon-modal-filter-select').forEach((input) => {
-    if (input.dataset.filtroBound === '1') return;
-    input.dataset.filtroBound = '1';
-    input.addEventListener('change', () => {
-      input.classList.toggle('ativo', Boolean(input.value));
-      aplicarFiltrosModalAtual();
+  document.querySelectorAll('#equipesModal .andon-modal-table thead tr:first-child th').forEach((th, index) => {
+    if (th.querySelector('.andon-modal-filter-menu')) return;
+    th.insertAdjacentHTML('beforeend', `
+      <div class="andon-modal-filter-menu hidden" data-col="${index}">
+        <input type="search" class="andon-modal-filter-search" placeholder="Pesquisar...">
+        <div class="andon-modal-filter-tools">
+          <button type="button" data-filter-action="all">Todos</button>
+          <button type="button" data-filter-action="none">Limpar</button>
+        </div>
+        <div class="andon-modal-filter-options"></div>
+        <div class="andon-modal-filter-actions">
+          <button type="button" data-filter-action="cancel">Cancelar</button>
+          <button type="button" data-filter-action="apply">Aplicar</button>
+        </div>
+      </div>
+    `);
+  });
+  preencherMenusFiltroModal();
+  document.querySelectorAll('#equipesModal .andon-modal-filter-btn').forEach((btn) => {
+    if (btn.dataset.filtroBound === '1') return;
+    btn.dataset.filtroBound = '1';
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const menu = btn.closest('th')?.querySelector('.andon-modal-filter-menu');
+      if (!menu) return;
+      const estavaAberto = !menu.classList.contains('hidden');
+      fecharMenusFiltroModal();
+      if (!estavaAberto) {
+        menu.classList.remove('hidden');
+        posicionarMenuFiltroModal(menu, btn);
+        menu.querySelector('.andon-modal-filter-search')?.focus();
+      }
     });
   });
   document.querySelectorAll('#equipesModal .andon-modal-sort').forEach((btn) => {
@@ -1353,6 +1780,23 @@ function ativarFiltrosOrdenacaoModal() {
     btn.dataset.sortBound = '1';
     btn.addEventListener('click', () => ordenarModalPorColuna(Number(btn.dataset.col || 0)));
   });
+  document.querySelectorAll('#equipesModal .andon-modal-filter-menu').forEach((menu) => {
+    if (menu.dataset.menuBound === '1') return;
+    menu.dataset.menuBound = '1';
+    menu.addEventListener('click', (event) => event.stopPropagation());
+    menu.querySelector('.andon-modal-filter-search')?.addEventListener('input', (event) => {
+      renderizarOpcoesFiltroMenuModal(menu, event.target.value || '');
+    });
+    menu.querySelector('[data-filter-action="all"]')?.addEventListener('click', () => {
+      menu.querySelectorAll('.andon-modal-filter-option input').forEach((input) => { input.checked = true; });
+    });
+    menu.querySelector('[data-filter-action="none"]')?.addEventListener('click', () => {
+      menu.querySelectorAll('.andon-modal-filter-option input').forEach((input) => { input.checked = false; });
+    });
+    menu.querySelector('[data-filter-action="cancel"]')?.addEventListener('click', fecharMenusFiltroModal);
+    menu.querySelector('[data-filter-action="apply"]')?.addEventListener('click', () => aplicarFiltroMenuModal(menu));
+  });
+  aplicarFiltrosModalAtual();
 }
 
 if (equipesModalBody) {
@@ -1396,6 +1840,27 @@ function obterBotaoExportarImagemModalEquipes() {
   return botao;
 }
 
+function obterBotaoAnaliseJustificadasModal() {
+  if (!equipesModal || !equipesModalClose) return null;
+  let botao = document.getElementById('equipesModalAnaliseJustificadas');
+  if (!botao) {
+    botao = document.createElement('button');
+    botao.type = 'button';
+    botao.id = 'equipesModalAnaliseJustificadas';
+    botao.className = 'andon-modal-action hidden';
+    botao.textContent = 'Análise';
+    equipesModalClose.insertAdjacentElement('beforebegin', botao);
+  }
+  return botao;
+}
+
+function configurarBotaoAnaliseJustificadas(visivel = false, modoAnalise = false) {
+  const botao = obterBotaoAnaliseJustificadasModal();
+  if (!botao) return;
+  botao.classList.toggle('hidden', !visivel);
+  botao.textContent = modoAnalise ? 'Tabela detalhada' : 'Análise';
+}
+
 function configurarBotaoVoltarModalEquipes(contexto = null) {
   modalEquipesVoltarContexto = contexto;
   const botao = obterBotaoVoltarModalEquipes();
@@ -1415,8 +1880,30 @@ function voltarModalEquipesAnterior() {
     abrirModalEquipesDLoteProd(contexto.options || {});
     return;
   }
+  if (contexto && contexto.tipoContexto === 'equipes-acordadas') {
+    abrirModalEquipesAcordadasDetalhado();
+    return;
+  }
+  if (contexto && contexto.tipoContexto === 'justificadas-analise') {
+    renderizarAnaliseJustificadasModal(contexto.grupoAtivo || '', contexto.descricaoAtiva || '');
+    return;
+  }
+  if (contexto && contexto.tipoContexto === 'performance-lista') {
+    configurarBotaoVoltarModalEquipes(null);
+    if (equipesModalTitle) equipesModalTitle.textContent = modalPerformanceEstado.contexto?.title || 'Performance';
+    if (equipesModalMeta) equipesModalMeta.textContent = modalPerformanceEstado.contexto?.meta || `Registros: ${formatInt(modalPerformanceEstado.lista.length)}`;
+    renderizarListaPerformanceModal();
+    return;
+  }
+  if (contexto && contexto.tipoContexto === 'lote-lista') {
+    configurarBotaoVoltarModalEquipes(null);
+    renderizarListaLoteModal();
+    return;
+  }
   abrirModalEquipesAndonContexto(contexto);
 }
+
+document.addEventListener('click', fecharMenusFiltroModal);
 
 function aplicarEstilosInlineParaExportacao(origem, destino) {
   if (!origem || !destino || origem.nodeType !== 1 || destino.nodeType !== 1) return;
@@ -1555,6 +2042,13 @@ function removerRodapeModalEquipes() {
   equipesModal?.querySelector('.andon-modal-table tfoot')?.remove();
 }
 
+function removerPainelPerformanceModal() {
+  document.getElementById('andonPerformanceModalPanel')?.remove();
+  document.getElementById('andonLoteModalPanel')?.remove();
+  equipesModal?.classList.remove('andon-modal-performance');
+  equipesModal?.classList.remove('andon-modal-lote');
+}
+
 function formatarMediaHoraModalEquipes(rows = [], campo = '') {
   return formatHoraMedia(mediaNumericaAndon(
     rows.map((row) => horaParaMinutos(row[campo])).filter((valor) => Number.isFinite(valor))
@@ -1647,6 +2141,292 @@ function renderizarRodapeModalEquipes(rows = []) {
   `);
 }
 
+function linhaPerformancePassaBusca(item = {}, busca = '') {
+  const termo = normalizarTextoFiltroModal(busca);
+  if (!termo) return true;
+  return [
+    item.data,
+    item.supervisor,
+    item.codigo,
+    item.equipe,
+    item.faixaDia,
+    item.percProdDia,
+    item.inicioJornada,
+    item.primeiroAtendimento,
+    item.ultimoAtendimento,
+    item.fimJornada
+  ].some((valor) => normalizarTextoFiltroModal(valor).includes(termo));
+}
+
+function filtrarListaPerformanceModal(lista = []) {
+  return lista.filter((item) => linhaPerformancePassaBusca(item, modalPerformanceEstado.busca || ''));
+}
+
+function obterFaixaPredominantePerformance(lista = []) {
+  const mapa = new Map();
+  lista.forEach((item) => {
+    const faixa = String(item.faixaDia || '-').trim() || '-';
+    mapa.set(faixa, (mapa.get(faixa) || 0) + 1);
+  });
+  return Array.from(mapa.entries())
+    .map(([faixa, total]) => ({ faixa, total }))
+    .sort((a, b) => b.total - a.total || a.faixa.localeCompare(b.faixa))[0] || { faixa: '-', total: 0 };
+}
+
+function obterResumoPerformanceModal(lista = []) {
+  const metaMedia = mediaNumericaAndon(lista.map((item) => Number(item.metaDia || 0)).filter((valor) => Number.isFinite(valor) && valor > 0));
+  const prodMedia = mediaNumericaAndon(lista.map((item) => Number(item.prodDia || 0)).filter((valor) => Number.isFinite(valor)));
+  const equipesD = lista.filter((item) => String(item.faixaDia || '').trim().toUpperCase() === 'D').length;
+  const semInicio = lista.filter((item) => !Number.isFinite(horaParaMinutos(item.inicioJornada))).length;
+  const faixaTop = obterFaixaPredominantePerformance(lista);
+  return {
+    total: lista.length,
+    equipesD,
+    semInicio,
+    metaMedia,
+    prodMedia,
+    faixaTop
+  };
+}
+
+function obterDiagnosticoPerformanceModal(lista = []) {
+  if (!lista.length) return 'Nenhuma equipe encontrada para o filtro atual.';
+  const ranking = obterRankingPerformancePorSupervisor(lista);
+  const critico = ranking[0];
+  const resumo = obterResumoPerformanceModal(lista);
+  const partes = [];
+  if (critico && critico.equipesD > 0) partes.push(`${critico.equipesD} equipes D concentradas em ${critico.supervisor}`);
+  if (resumo.semInicio > 0) partes.push(`${resumo.semInicio} equipes sem inicio de jornada`);
+  partes.push(`faixa predominante ${resumo.faixaTop.faixa} em ${formatInt(resumo.faixaTop.total)} equipes`);
+  return partes.join(' | ');
+}
+
+function renderizarPainelPerformanceModal(lista = []) {
+  const tableWrap = equipesModal?.querySelector('.andon-modal-table-wrap');
+  if (!tableWrap) return;
+  removerPainelPerformanceModal();
+  equipesModal?.classList.add('andon-modal-performance');
+  const resumo = obterResumoPerformanceModal(lista);
+  const diagnostico = obterDiagnosticoPerformanceModal(lista);
+  const painel = document.createElement('div');
+  painel.id = 'andonPerformanceModalPanel';
+  painel.className = 'andon-performance-panel';
+  painel.innerHTML = `
+    <div class="andon-performance-toolbar">
+      <label>
+        <span>Busca</span>
+        <input type="search" class="andon-performance-search" value="${escaparHtmlModal(modalPerformanceEstado.busca || '')}" placeholder="Equipe, supervisor, faixa, horario...">
+      </label>
+      <button type="button" class="andon-performance-search-btn">Buscar</button>
+      <button type="button" class="andon-performance-ranking-btn">Ranking</button>
+      <button type="button" class="andon-performance-reinc-btn">Reincidencia</button>
+    </div>
+    <div class="andon-performance-summary">
+      <div><span>Total de equipes</span><strong>${formatInt(resumo.total)}</strong></div>
+      <div><span>Equipes D</span><strong>${formatInt(resumo.equipesD)}</strong></div>
+      <div><span>Faixa predominante</span><strong>${escaparHtmlModal(resumo.faixaTop.faixa)} (${formatInt(resumo.faixaTop.total)})</strong></div>
+      <div><span>Media meta</span><strong>${Number.isFinite(resumo.metaMedia) ? formatNumber3(resumo.metaMedia) : '-'}</strong></div>
+      <div><span>Media producao</span><strong>${Number.isFinite(resumo.prodMedia) ? formatNumber3(resumo.prodMedia) : '-'}</strong></div>
+      <div><span>Sem inicio jornada</span><strong>${formatInt(resumo.semInicio)}</strong></div>
+    </div>
+    <div class="andon-performance-diagnostic">
+      <span>Diagnostico automatico</span>
+      <strong>${escaparHtmlModal(diagnostico)}</strong>
+    </div>
+  `;
+  tableWrap.insertAdjacentElement('beforebegin', painel);
+  painel.querySelector('.andon-performance-search')?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    modalPerformanceEstado.busca = event.target.value || '';
+    renderizarListaPerformanceModal();
+  });
+  painel.querySelector('.andon-performance-search-btn')?.addEventListener('click', () => {
+    modalPerformanceEstado.busca = painel.querySelector('.andon-performance-search')?.value || '';
+    renderizarListaPerformanceModal();
+  });
+  painel.querySelector('.andon-performance-ranking-btn')?.addEventListener('click', abrirRankingPerformanceModal);
+  painel.querySelector('.andon-performance-reinc-btn')?.addEventListener('click', abrirReincidenciaPerformanceModal);
+}
+
+function renderizarLinhaPerformanceModal(item = {}, habilitarDetalheDias = true) {
+  return `
+    <tr>
+      <td class="andon-modal-datas" title="${item.data || '-'}">${item.data || '-'}</td>
+      <td class="${habilitarDetalheDias && Number(item.diasTrabalhados || 0) > 0 ? 'andon-dias-trab-cell' : ''}" data-dias-id="${habilitarDetalheDias ? item.detalheDiasId || '' : ''}">${
+        habilitarDetalheDias && Number(item.diasTrabalhados || 0) > 0
+          ? `<button class="andon-dias-trab-btn" type="button" data-dias-id="${item.detalheDiasId}">${formatInt(item.diasTrabalhados || 0)}</button>`
+          : formatInt(item.diasTrabalhados || 0)
+      }</td>
+      <td>${item.supervisor || '-'}</td>
+      <td>${item.equipe}</td>
+      <td>${formatNumber3(item.metaDia)}</td>
+      <td>${formatNumber3(item.prodDia)}</td>
+      <td class="andon-faixa faixa-${item.faixaDia || '-'}">${item.faixaDia || '-'}</td>
+      <td>${formatPercent(item.percProdDia || 0)}</td>
+      <td>${item.inicioJornada || '-'}</td>
+      <td>${item.inicioRefeicao || '-'}</td>
+      <td>${item.terminoRefeicao || '-'}</td>
+      <td>${item.primeiroAtendimento || '-'}</td>
+      <td>${item.ultimoAtendimento || '-'}</td>
+      <td>${item.fimJornada || '-'}</td>
+      <td>${item.jornadaProdutiva || '-'}</td>
+      <td><button type="button" class="andon-performance-hist-btn" data-performance-hist-codigo="${escaparHtmlModal(item.codigo || '')}">Ver</button></td>
+    </tr>
+  `;
+}
+
+function renderizarListaPerformanceModal() {
+  const lista = filtrarListaPerformanceModal(modalPerformanceEstado.lista || []);
+  renderCabecalhoModalEquipesPadrao({ comHistorico: true });
+  renderizarPainelPerformanceModal(lista);
+  renderizarModalBodyEmLotes(
+    lista,
+    (item) => renderizarLinhaPerformanceModal(item, modalPerformanceEstado.contexto?.habilitarDetalheDias !== false),
+    '<tr><td colspan="16" class="andon-modal-empty">Nenhuma equipe encontrada para este filtro.</td></tr>'
+  );
+  renderizarRodapeModalEquipes(lista);
+  equipesModal?.querySelector('.andon-modal-table tfoot tr')?.insertAdjacentHTML('beforeend', '<td>-</td>');
+}
+
+function obterRankingPerformancePorSupervisor(lista = []) {
+  const mapa = new Map();
+  lista.forEach((item) => {
+    const supervisor = String(item.supervisor || '-').trim() || '-';
+    const atual = mapa.get(supervisor) || {
+      supervisor,
+      total: 0,
+      equipesD: 0,
+      somaPerc: 0,
+      qtdPerc: 0,
+      semInicio: 0
+    };
+    atual.total += 1;
+    if (String(item.faixaDia || '').trim().toUpperCase() === 'D') atual.equipesD += 1;
+    const perc = Number(item.percProdDia || 0);
+    if (Number.isFinite(perc)) {
+      atual.somaPerc += perc;
+      atual.qtdPerc += 1;
+    }
+    if (!Number.isFinite(horaParaMinutos(item.inicioJornada))) atual.semInicio += 1;
+    mapa.set(supervisor, atual);
+  });
+  return Array.from(mapa.values())
+    .map((item) => ({
+      ...item,
+      mediaPerc: item.qtdPerc ? item.somaPerc / item.qtdPerc : Number.NaN
+    }))
+    .sort((a, b) => b.equipesD - a.equipesD || b.total - a.total || a.supervisor.localeCompare(b.supervisor, 'pt-BR', { sensitivity: 'base' }));
+}
+
+function abrirRankingPerformanceModal() {
+  const lista = filtrarListaPerformanceModal(modalPerformanceEstado.lista || []);
+  const ranking = obterRankingPerformancePorSupervisor(lista);
+  removerPainelPerformanceModal();
+  renderCabecalhoModalGenerico([
+    { label: 'Rank' },
+    { label: 'Supervisor' },
+    { label: 'Total Equipes' },
+    { label: 'Equipes D' },
+    { label: '% Medio' },
+    { label: 'Sem Inicio' }
+  ]);
+  if (equipesModalTitle) equipesModalTitle.textContent = 'Ranking Performance por Supervisor';
+  if (equipesModalMeta) equipesModalMeta.textContent = `Base: ${formatInt(lista.length)} equipes | Ordenado por Equipes D`;
+  configurarBotaoVoltarModalEquipes({ tipoContexto: 'performance-lista' });
+  renderizarModalBodyEmLotes(
+    ranking,
+    (item, index) => `
+      <tr>
+        <td>${formatInt(index + 1)}</td>
+        <td>${escaparHtmlModal(item.supervisor || '-')}</td>
+        <td>${formatInt(item.total)}</td>
+        <td>${formatInt(item.equipesD)}</td>
+        <td>${Number.isFinite(item.mediaPerc) ? formatPercent(item.mediaPerc) : '-'}</td>
+        <td>${formatInt(item.semInicio)}</td>
+      </tr>
+    `,
+    '<tr><td colspan="6" class="andon-modal-empty">Nenhum ranking encontrado.</td></tr>'
+  );
+}
+
+function abrirReincidenciaPerformanceModal() {
+  const lista = filtrarListaPerformanceModal(modalPerformanceEstado.lista || [])
+    .filter((item) => Number(item.diasTrabalhados || 0) >= 2 || String(item.faixaDia || '').toUpperCase() === 'D')
+    .sort((a, b) => Number(b.diasTrabalhados || 0) - Number(a.diasTrabalhados || 0) || Number(a.percProdDia || 0) - Number(b.percProdDia || 0));
+  removerPainelPerformanceModal();
+  renderCabecalhoModalGenerico([
+    { label: 'Supervisor' },
+    { label: 'Equipe' },
+    { label: 'Dias' },
+    { label: 'Faixa' },
+    { label: '% Prod.' },
+    { label: 'Inicio Jornada' },
+    { label: 'Hist.' }
+  ]);
+  if (equipesModalTitle) equipesModalTitle.textContent = 'Reincidencia Performance';
+  if (equipesModalMeta) equipesModalMeta.textContent = `Equipes com repeticao ou faixa D: ${formatInt(lista.length)}`;
+  configurarBotaoVoltarModalEquipes({ tipoContexto: 'performance-lista' });
+  renderizarModalBodyEmLotes(
+    lista,
+    (item) => `
+      <tr>
+        <td>${escaparHtmlModal(item.supervisor || '-')}</td>
+        <td>${escaparHtmlModal(item.equipe || '-')}</td>
+        <td>${formatInt(item.diasTrabalhados || 0)}</td>
+        <td class="andon-faixa faixa-${item.faixaDia || '-'}">${item.faixaDia || '-'}</td>
+        <td>${formatPercent(item.percProdDia || 0)}</td>
+        <td>${item.inicioJornada || '-'}</td>
+        <td><button type="button" class="andon-performance-hist-btn" data-performance-hist-codigo="${escaparHtmlModal(item.codigo || '')}">Ver</button></td>
+      </tr>
+    `,
+    '<tr><td colspan="7" class="andon-modal-empty">Nenhuma reincidencia encontrada.</td></tr>'
+  );
+}
+
+function abrirHistoricoPerformanceEquipe(codigo = '') {
+  const codigoTexto = String(codigo || '').trim();
+  if (!codigoTexto) return;
+  const contexto = modalPerformanceEstado.contexto || {};
+  const rowsEquipe = (modalPerformanceEstado.rows || []).filter((row) => String(obterCodigoEquipeLinha(row) || '').trim() === codigoTexto);
+  const controleEquipe = Array.isArray(modalPerformanceEstado.controleRows)
+    ? modalPerformanceEstado.controleRows.filter((row) => String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim() === codigoTexto)
+    : null;
+  const historico = montarLinhasModalEquipes(rowsEquipe, 'todas', controleEquipe, {
+    agruparPorData: true,
+    apenasComInicioJornada: contexto.apenasComInicioJornada
+  });
+  removerPainelPerformanceModal();
+  renderCabecalhoModalEquipesPadrao({ comHistorico: false });
+  const equipe = modalPerformanceEstado.lista.find((item) => String(item.codigo || '').trim() === codigoTexto)?.equipe || codigoTexto;
+  if (equipesModalTitle) equipesModalTitle.textContent = `Historico Performance - ${equipe}`;
+  if (equipesModalMeta) equipesModalMeta.textContent = `Codigo: ${codigoTexto} | Dias: ${formatInt(historico.length)}`;
+  configurarBotaoVoltarModalEquipes({ tipoContexto: 'performance-lista' });
+  renderizarModalBodyEmLotes(
+    historico,
+    (item) => `
+      <tr>
+        <td class="andon-modal-datas" title="${item.data || '-'}">${item.data || '-'}</td>
+        <td>${formatInt(item.diasTrabalhados || 0)}</td>
+        <td>${item.supervisor || '-'}</td>
+        <td>${item.equipe}</td>
+        <td>${formatNumber3(item.metaDia)}</td>
+        <td>${formatNumber3(item.prodDia)}</td>
+        <td class="andon-faixa faixa-${item.faixaDia || '-'}">${item.faixaDia || '-'}</td>
+        <td>${formatPercent(item.percProdDia || 0)}</td>
+        <td>${item.inicioJornada || '-'}</td>
+        <td>${item.inicioRefeicao || '-'}</td>
+        <td>${item.terminoRefeicao || '-'}</td>
+        <td>${item.primeiroAtendimento || '-'}</td>
+        <td>${item.ultimoAtendimento || '-'}</td>
+        <td>${item.fimJornada || '-'}</td>
+        <td>${item.jornadaProdutiva || '-'}</td>
+      </tr>
+    `,
+    '<tr><td colspan="15" class="andon-modal-empty">Nenhum historico encontrado para esta equipe.</td></tr>'
+  );
+  renderizarRodapeModalEquipes(historico);
+}
+
 function renderizarRodapeModalLoteProd(rows = []) {
   removerRodapeModalEquipes();
   if (!equipesModal || !rows.length) return;
@@ -1669,7 +2449,7 @@ function renderizarRodapeModalLoteProd(rows = []) {
   const prodLoteMedia = mediaNumericaAndon(rows.map((row) => Number(row.prodDia || 0)).filter((valor) => Number.isFinite(valor)));
   const metaLoteMedia = mediaNumericaAndon(rows.map((row) => Number(row.metaDia || 0)).filter((valor) => Number.isFinite(valor) && valor > 0));
   const percLote = Number.isFinite(metaLoteMedia) && metaLoteMedia > 0 && Number.isFinite(prodLoteMedia)
-    ? (prodLoteMedia / metaLoteMedia) * 100
+    ? (normalizarProducaoLoteParaMeta(prodLoteMedia) / metaLoteMedia) * 100
     : Number.NaN;
   const faixaWm = Number.isFinite(percWm) ? classificarFaixa(percWm) : '-';
   const faixaLote = Number.isFinite(percLote) ? classificarFaixa(percLote) : '-';
@@ -1703,7 +2483,8 @@ function renderizarRodapeModalLoteProd(rows = []) {
 
 function abrirModalTabelaGenerica({ title = 'Detalhes', meta = '', columns = [], rows = [], empty = 'Nenhum registro encontrado.' } = {}) {
   if (!equipesModal || !equipesModalBody) return;
-  const listaRows = Array.isArray(rows) ? rows : Array.from(rows || []);
+  const listaRows = (Array.isArray(rows) ? rows : Array.from(rows || []))
+    .filter(itemEquipeDeveAparecerModal);
   aplicarModalTelaCheia(true);
   renderCabecalhoModalGenerico(columns);
 
@@ -1723,6 +2504,7 @@ function abrirModalTabelaGenerica({ title = 'Detalhes', meta = '', columns = [],
 function removerResumoControleServicoModal() {
   document.getElementById('controleServicoResumoModal')?.remove();
   document.getElementById('andonModalPagination')?.remove();
+  removerPainelPerformanceModal();
   removerRodapeModalEquipes();
   equipesModal?.classList.remove('andon-modal-controle-servico');
   equipesModal?.classList.remove('andon-modal-controle-agregado');
@@ -1734,7 +2516,8 @@ function removerResumoControleServicoModal() {
 function obterRowsReportPorCodigos(codigos = new Set()) {
   const permitidos = new Set(Array.from(codigos).map((codigo) => String(codigo).trim()).filter(Boolean));
   if (!permitidos.size) return [];
-  return filtrarReportRowsAndon().filter((row) => permitidos.has(String(obterCodigoEquipeLinha(row) || '').trim()));
+  const mapa = obterMapaReportPorCodigoAndon();
+  return Array.from(permitidos).flatMap((codigo) => mapa.get(codigo) || []);
 }
 
 function obterReferenciaFinalServico(row) {
@@ -1851,27 +2634,151 @@ function obterCodigosEquipesUoAtual() {
   return obterCodigosReportRows(filtrarReportRowsAndon());
 }
 
-function abrirModalEquipesDLoteProd(options = {}) {
-  if (!equipesModal || !equipesModalBody) return;
-  aplicarModalTelaCheia(true);
+function itemTemDadosWm(item = {}) {
+  const temSinalOperacionalWm = Boolean(
+    Number(item.producaoWm || 0) > 0 ||
+    (item.faixaWm && item.faixaWm !== '-') ||
+    (item.inicioJornada && item.inicioJornada !== '-') ||
+    (item.primeiroAtendimento && item.primeiroAtendimento !== '-') ||
+    (item.ultimoAtendimento && item.ultimoAtendimento !== '-') ||
+    (item.fimJornada && item.fimJornada !== '-') ||
+    (item.jornadaProdutiva && item.jornadaProdutiva !== '-')
+  );
+  if (Object.prototype.hasOwnProperty.call(item, '_temWm')) {
+    return Boolean(item._temWm) || temSinalOperacionalWm;
+  }
+  return Boolean(
+    Number(item.metaWm || 0) > 0 ||
+    temSinalOperacionalWm
+  );
+}
 
+function itemPossuiProducaoWmOuLote(item = {}) {
+  return Number(item.producaoWm || 0) > 0 || Number(item.prodDia || 0) > 0;
+}
+
+function itemEquipeEhMtami(item = {}) {
+  return textoContemMtami(item.equipe || item.NOME_EQUIPE || item.Nome || item.NOME || '');
+}
+
+function obterDataPrincipalItem(item = {}) {
+  return normalizarDataIso((item.datas && item.datas[0]) || item.data || item.DATA || '');
+}
+
+function valoresProximos(a, b, tolerancia = 0.001) {
+  return Math.abs(Number(a || 0) - Number(b || 0)) <= tolerancia;
+}
+
+function aplicarPareamentoMtamiPorProducao(lista = []) {
+  const wmPorData = new Map();
+  const lotePorDataProd = new Map();
+
+  lista.forEach((item) => {
+    if (!itemEquipeEhMtami(item)) return;
+    const data = obterDataPrincipalItem(item);
+    if (!data) return;
+
+    if (itemTemDadosWm(item) && Number(item.producaoWm || 0) > 0) {
+      if (!wmPorData.has(data)) wmPorData.set(data, []);
+      wmPorData.get(data).push(item);
+      return;
+    }
+
+    if (Number(item.prodDia || 0) > 0) {
+      const chave = `${data}|${Number(item.prodDia || 0).toFixed(3)}`;
+      if (!lotePorDataProd.has(chave)) lotePorDataProd.set(chave, []);
+      lotePorDataProd.get(chave).push(item);
+    }
+  });
+
+  const pares = [];
+  let semPar = 0;
+
+  wmPorData.forEach((wms, data) => {
+    wms.forEach((wm) => {
+      const producaoPar = Number(wm.producaoWm || 0) / 2;
+      if (!Number.isFinite(producaoPar) || producaoPar <= 0) return;
+
+      const chave = `${data}|${producaoPar.toFixed(3)}`;
+      const candidatos = lotePorDataProd.get(chave) || [];
+      if (candidatos.length < 2) return;
+
+      const par = candidatos.splice(0, 2);
+      const pairId = `MTAMI|${data}|${String(wm.codigo || '')}|${pares.length + 1}`;
+      par.forEach((item) => {
+        item._temWm = true;
+        item._mtamiPareado = true;
+        item._mtamiPairId = pairId;
+        item._mtamiWmCodigo = wm.codigo || '';
+        item.comparativo = 'WM E LOTE';
+        item.producaoWm = producaoPar;
+        item.percentualWm = Number(item.metaWm || 0) > 0 ? (producaoPar / Number(item.metaWm || 0)) * 100 : item.percentualWm;
+      });
+      wm._mtamiPareadoPorLote = true;
+      if (Number(wm.prodDia || 0) <= 0) wm._ocultarLinhaPareadaMtami = true;
+      pares.push({ pairId, wm, itens: par });
+    });
+  });
+
+  lotePorDataProd.forEach((restantes) => {
+    semPar += restantes.filter((item) => itemEquipeEhMtami(item)).length;
+  });
+
+  return { pares: pares.length, semPar };
+}
+
+function calcularMetricasComparativoLote(lista = [], codigosDwm = new Set(), codigosLoteDRegra = new Set(), somenteD = false) {
+  if (!somenteD) {
+    return {
+      totalDwm: lista.length,
+      totalDLote: lista.length,
+      somenteWm: 0,
+      somenteLote: 0,
+      mtamiSemPar: 0
+    };
+  }
+
+  const paresMtami = new Set();
+  let mtamiSemPar = 0;
+  let totalDLote = 0;
+  let somenteLote = 0;
+
+  lista.forEach((item) => {
+    const codigo = String(item.codigo || '').trim();
+    if (!codigosLoteDRegra.has(codigo)) return;
+
+    if (item._mtamiPareado && item._mtamiPairId) {
+      if (!paresMtami.has(item._mtamiPairId)) {
+        paresMtami.add(item._mtamiPairId);
+        totalDLote += 1;
+      }
+      return;
+    }
+
+    totalDLote += 1;
+    if (itemEquipeEhMtami(item)) mtamiSemPar += 1;
+    if (item.comparativo === 'SOMENTE LOTE') somenteLote += 1;
+  });
+
+  return {
+    totalDwm: new Set(lista
+      .filter((item) => itemPossuiProducaoWmOuLote(item) && (item.comparativo === 'SOMENTE WM' || item.comparativo === 'WM E LOTE'))
+      .map((item) => String(item._mtamiWmCodigo || item.codigo || '').trim())
+      .filter(Boolean)
+    ).size,
+    totalDLote,
+    somenteWm: lista.filter((item) => item.comparativo === 'SOMENTE WM').length,
+    somenteLote,
+    mtamiSemPar
+  };
+}
+
+function montarListaComparativoEquipesDLoteProd(options = {}) {
   const somenteD = options.somenteD !== false;
+  const agruparPorData = Boolean(options.agruparPorData);
   const codigosUoAtual = obterCodigosEquipesUoAtual();
   const reportRowsModal = options.reportRows || filtrarReportRowsAndon();
   const codigosDwm = obterEquipesDBaseTotal(reportRowsModal).equipesD;
-  const datasDwmPorCodigo = new Map();
-  const chavesDwm = new Set();
-  const obterChaveComparativo = (codigo, dataIso = '') => `${String(codigo || '').trim()}|${dataIso || ''}`;
-  reportRowsModal.forEach((row) => {
-    const codigo = String(obterCodigoEquipeLinha(row) || '').trim();
-    if (!codigo || !codigosDwm.has(codigo)) return;
-    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
-    if (dataIso) {
-      if (!datasDwmPorCodigo.has(codigo)) datasDwmPorCodigo.set(codigo, new Set());
-      datasDwmPorCodigo.get(codigo).add(dataIso);
-    }
-    chavesDwm.add(obterChaveComparativo(codigo, dataIso));
-  });
   const rowsBase = Array.isArray(options.rows)
     ? options.rows
     : filtrarLoteProdEquipesRowsAndon();
@@ -1881,119 +2788,328 @@ function abrirModalEquipesDLoteProd(options = {}) {
     return codigosUoAtual.has(obterCodigoEquipeLote(row));
   });
   const codigosLoteDRegra = obterEquipesDBaseLoteProd(rowsLoteTodasFiltradas).equipesD;
-  const rowsLoteFiltradas = somenteD
-    ? rowsLoteTodasFiltradas.filter((row) => codigosLoteDRegra.has(obterCodigoEquipeLote(row)))
+  const codigosComparativo = somenteD
+    ? new Set([...Array.from(codigosDwm), ...Array.from(codigosLoteDRegra)])
+    : null;
+  const rowsLoteFiltradas = codigosComparativo
+    ? rowsLoteTodasFiltradas.filter((row) => codigosComparativo.has(obterCodigoEquipeLote(row)))
     : rowsLoteTodasFiltradas;
-  const mapaLote = new Map();
-  const codigosLote = new Set();
-  rowsLoteFiltradas.forEach((row) => {
-    const codigo = obterCodigoEquipeLote(row);
-    if (!codigo) return;
-    const dataLote = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
-    codigosLote.add(codigo);
-    const chave = obterChaveComparativo(codigo, dataLote);
-    const faixa = String(obterValorPrimeiro(row, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || '').trim().toUpperCase();
-    const atual = mapaLote.get(chave) || mapaLote.get(obterChaveComparativo(codigo, ''));
-    if (!atual || faixa === 'D') mapaLote.set(chave, row);
-  });
-  const rows = somenteD
-    ? [
-        ...Array.from(chavesDwm).map((chave) => {
-          const [codigo, dataIso = ''] = chave.split('|');
-          return mapaLote.get(chave) || mapaLote.get(obterChaveComparativo(codigo, '')) || {
-            COD_EQUIPE: String(codigo),
-            DATA: dataIso,
-            _SOMENTE_WM: true
+
+  const listaBase = montarLinhasModalEquipesLoteProd(rowsLoteFiltradas, reportRowsModal, { agruparPorData });
+  const codigosNaLista = new Set(listaBase.map((item) => String(item.codigo || '').trim()).filter(Boolean));
+  const listaWmSemLote = somenteD
+    ? Array.from(codigosDwm)
+        .filter((codigo) => !codigosNaLista.has(String(codigo)))
+        .map((codigo) => {
+          const wm = montarLinhasModalEquipes(reportRowsModal, 'todas', filtrarControleRowsAndon(), { agruparPorData })
+            .find((item) => String(item.codigo || '').trim() === String(codigo));
+          return {
+            ...(wm || {}),
+            codigo: String(codigo),
+            datas: wm?.datas || [],
+            data: wm?.data || '-',
+            diasTrabalhados: wm?.diasTrabalhados || 0,
+            supervisor: wm?.supervisor || '-',
+            equipe: wm?.equipe || String(codigo),
+            _temWm: true,
+            metaWm: Number(wm?.metaDia || 0),
+            producaoWm: Number(wm?.prodDia || 0),
+            percentualWm: Number(wm?.metaDia || 0) > 0 ? (Number(wm?.prodDia || 0) / Number(wm?.metaDia || 0)) * 100 : 0,
+            faixaWm: wm?.faixaDia || '-',
+            metaDia: 0,
+            prodDia: 0,
+            percentualLote: 0,
+            faixaLote: '-',
+            comparativo: 'SOMENTE WM'
           };
-        }),
-        ...rowsLoteFiltradas
-          .filter((row) => {
-            const codigo = obterCodigoEquipeLote(row);
-            const dataLote = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
-            return codigo && !chavesDwm.has(obterChaveComparativo(codigo, dataLote)) && !chavesDwm.has(obterChaveComparativo(codigo, ''));
-          })
-          .map((row) => ({ ...row, _SOMENTE_LOTE: true }))
-      ]
-    : rowsLoteFiltradas;
-  const mapaNomes = obterMapaNomesEquipesReport(reportRowsModal);
-  const mapaSupervisor = new Map();
-  reportRowsModal.forEach((reportRow) => {
-    const codigo = String(obterCodigoEquipeLinha(reportRow) || '').trim();
-    if (!codigo || mapaSupervisor.has(codigo)) return;
-    mapaSupervisor.set(codigo, String(obterValorPrimeiro(reportRow, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']) || '-').trim() || '-');
-  });
-  const mapaWm = new Map(
-    montarLinhasModalEquipes(reportRowsModal, 'todas', filtrarControleRowsAndon())
-      .map((item) => [String(item.codigo || '').trim(), item])
-      .filter(([codigo]) => Boolean(codigo))
-  );
+        })
+    : [];
+
+  let lista = [...listaBase, ...listaWmSemLote]
+    .filter((item) => {
+      if (!somenteD) return true;
+      const codigo = String(item.codigo || '').trim();
+      return codigosDwm.has(codigo) || codigosLoteDRegra.has(codigo);
+    })
+    .map((item) => {
+      if (!somenteD) return { ...item, comparativo: item.comparativo || 'LOTE PROD.' };
+      const codigo = String(item.codigo || '').trim();
+      const inDLote = codigosLoteDRegra.has(codigo);
+      const inWm = itemTemDadosWm(item);
+      return {
+        ...item,
+        comparativo: inWm && inDLote ? 'WM E LOTE' : (inWm ? 'SOMENTE WM' : 'SOMENTE LOTE')
+      };
+    });
+
+  const pareamentoMtami = aplicarPareamentoMtamiPorProducao(lista);
+  lista = lista.filter((item) => !item._ocultarLinhaPareadaMtami && itemPossuiProducaoWmOuLote(item));
+
+  return {
+    lista,
+    pareamentoMtami,
+    codigosDwm,
+    codigosLoteDRegra,
+    rowsLoteFiltradas,
+    reportRowsModal
+  };
+}
+
+function contarEquipesDLoteProdVisiveis(options = {}) {
+  const contexto = montarListaComparativoEquipesDLoteProd({ ...options, somenteD: true });
+  return calcularMetricasComparativoLote(
+    contexto.lista,
+    contexto.codigosDwm,
+    contexto.codigosLoteDRegra,
+    true
+  ).totalDLote;
+}
+
+function abrirModalEquipesDLoteProd(options = {}) {
+  if (!equipesModal || !equipesModalBody) return;
+  aplicarModalTelaCheia(true);
+
+  const somenteD = options.somenteD !== false;
+  const agruparPorData = Boolean(options.agruparPorData);
+  const habilitarDetalheDias = options.habilitarDetalheDias !== false && !agruparPorData;
+  const contextoLote = montarListaComparativoEquipesDLoteProd(options);
+  const codigosDwm = contextoLote.codigosDwm;
+  const codigosLoteDRegra = contextoLote.codigosLoteDRegra;
+  const rowsLoteFiltradas = contextoLote.rowsLoteFiltradas;
+  const reportRowsModal = contextoLote.reportRowsModal;
+  const pareamentoMtami = contextoLote.pareamentoMtami;
+  let lista = contextoLote.lista;
+  lista = lista.sort((a, b) => compararFaixaDiaDesc({ ...a, faixaDia: a.faixaLote }, { ...b, faixaDia: b.faixaLote }));
+
   renderCabecalhoModalEquipesDLoteProd();
+  equipesModal.classList.toggle('andon-modal-detalhe-datas', agruparPorData);
 
   if (equipesModalTitle) equipesModalTitle.textContent = options.title || (somenteD ? 'Equipes D Lote Prod.' : 'Total Equipes Lote Prod.');
 
-  const rowsOrdenadas = [...rows].sort((a, b) => {
-    const faixaA = String(obterValorPrimeiro(a, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || '').trim().toUpperCase();
-    const faixaB = String(obterValorPrimeiro(b, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || '').trim().toUpperCase();
-    return compararFaixaDiaDesc({ ...a, faixaDia: faixaA }, { ...b, faixaDia: faixaB });
-  });
-  const totalDwm = somenteD ? codigosDwm.size : rows.length;
-  const totalDLoteNoComparativo = somenteD ? codigosLote.size : rows.length;
-  const somenteWm = somenteD ? rows.filter((row) => row._SOMENTE_WM).length : 0;
-  const somenteLote = somenteD ? rows.filter((row) => row._SOMENTE_LOTE).length : 0;
+  const metricasComparativo = calcularMetricasComparativoLote(lista, codigosDwm, codigosLoteDRegra, somenteD);
+  const totalDwm = metricasComparativo.totalDwm;
+  const totalDLoteNoComparativo = metricasComparativo.totalDLote;
+  const somenteWm = metricasComparativo.somenteWm;
+  const somenteLote = metricasComparativo.somenteLote;
+  const avisoMtami = pareamentoMtami.semPar
+    ? ` | MTAMI sem par: ${formatInt(pareamentoMtami.semPar)}`
+    : '';
   if (equipesModalMeta) {
     equipesModalMeta.textContent = options.meta && !somenteD ? options.meta : (somenteD
-      ? `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | D WM: ${formatInt(totalDwm)} | D Lote: ${formatInt(totalDLoteNoComparativo)} | Somente WM: ${formatInt(somenteWm)} | Somente Lote: ${formatInt(somenteLote)}`
-      : `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(rows.length)}`);
+      ? `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | D WM: ${formatInt(totalDwm)} | D Lote: ${formatInt(totalDLoteNoComparativo)} | Somente WM: ${formatInt(somenteWm)} | Somente Lote: ${formatInt(somenteLote)}${avisoMtami}`
+      : `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(lista.length)}`);
   }
 
-  renderizarModalBodyEmLotes(
-    rowsOrdenadas,
-    (row) => {
-      const codigo = obterCodigoEquipeLote(row);
-      const wm = mapaWm.get(String(codigo || '').trim()) || {};
-      const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
-      const dataTxt = dataIso ? dataIso.split('-').reverse().join('/') : '-';
-      const metaWm = Number(wm.metaDia || 0);
-      const producaoWm = Number(wm.prodDia || 0);
-      const percentualWm = metaWm > 0 ? (producaoWm / metaWm) * 100 : 0;
-      const faixaWm = wm.faixaDia || classificarFaixa(percentualWm);
-      const metaLote = toNumberSafe(obterValorPrimeiro(row, ['META', 'Meta']));
-      const producaoLote = toNumberSafe(obterValorPrimeiro(row, ['VALOR_US', 'Valor_US', 'valor_us']));
-      const percentualLote = metaLote > 0 ? (producaoLote / metaLote) * 100 : 0;
-      const faixaLoteFallback = metaLote > 0 ? classificarFaixa(percentualLote) : '-';
-      const faixaLote = String(obterValorPrimeiro(row, ['FAIXA_DIA', 'Faixa_Dia', 'faixa_dia']) || faixaLoteFallback || '-').trim().toUpperCase();
-      const comparativo = row._SOMENTE_WM ? 'SOMENTE WM' : (row._SOMENTE_LOTE ? 'SOMENTE LOTE' : 'WM E LOTE');
+  modalDetalheEquipesDias = new Map();
+  configurarBotaoVoltarModalEquipes(options.voltarContexto || null);
+  if (habilitarDetalheDias) {
+    lista.forEach((item, index) => {
+      const detalheId = `lote-dias-${Date.now()}-${index}`;
+      item.detalheDiasId = detalheId;
+      modalDetalheEquipesDias.set(detalheId, {
+        tipoDetalhe: 'lote-prod',
+        item,
+        rows: rowsLoteFiltradas,
+        reportRows: reportRowsModal,
+        somenteD,
+        title: equipesModalTitle?.textContent || '',
+        meta: equipesModalMeta?.textContent || '',
+        origemOptions: {
+          ...options,
+          rows: rowsLoteFiltradas,
+          reportRows: reportRowsModal,
+          somenteD,
+          agruparPorData: false,
+          habilitarDetalheDias: true
+        }
+      });
+    });
+  }
 
-      return `
-        <tr>
-          <td>${dataTxt}</td>
-          <td>${String(obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']) || mapaSupervisor.get(String(codigo || '').trim()) || '-')}</td>
-          <td>${mapaNomes.get(codigo) || wm.equipe || codigo || '-'}</td>
-          <td>${formatNumber3(metaWm)}</td>
-          <td>${formatNumber3(producaoWm)}</td>
-          <td class="andon-faixa faixa-${faixaWm || '-'}">${faixaWm || '-'}</td>
-          <td>${formatPercent(percentualWm)}</td>
-          <td>${formatNumber3Scale100(producaoLote)}</td>
-          <td class="andon-faixa faixa-${faixaLote}">${faixaLote}</td>
-          <td>${formatPercent(percentualLote)}</td>
-          <td>${wm.inicioJornada || '-'}</td>
-          <td>${wm.inicioRefeicao || '-'}</td>
-          <td>${wm.terminoRefeicao || '-'}</td>
-          <td>${wm.primeiroAtendimento || '-'}</td>
-          <td>${wm.ultimoAtendimento || '-'}</td>
-          <td>${wm.fimJornada || '-'}</td>
-          <td>${wm.jornadaProdutiva || '-'}</td>
-          <td>${comparativo}</td>
-        </tr>
-      `;
-    },
-    `<tr><td colspan="18" class="andon-modal-empty">Nenhuma equipe${somenteD ? ' D' : ''} encontrada no lote produtivo.</td></tr>`
-  );
+  modalLoteEstado = {
+    lista,
+    busca: '',
+    options,
+    habilitarDetalheDias,
+    title: equipesModalTitle?.textContent || '',
+    meta: equipesModalMeta?.textContent || ''
+  };
+  renderizarListaLoteModal();
+  restaurarFiltrosModalQuandoPronto(options.modalFiltros || null);
 
   equipesModal.classList.remove('hidden');
 }
 
+function linhaLotePassaBusca(item = {}, busca = '') {
+  const termo = normalizarTextoFiltroModal(busca);
+  if (!termo) return true;
+  return [
+    item.data,
+    item.supervisor,
+    item.codigo,
+    item.equipe,
+    item.faixaWm,
+    item.faixaLote,
+    item.comparativo
+  ].some((valor) => normalizarTextoFiltroModal(valor).includes(termo));
+}
+
+function obterListaLoteFiltrada() {
+  return (modalLoteEstado.lista || []).filter((item) => linhaLotePassaBusca(item, modalLoteEstado.busca || ''));
+}
+
+function obterDiagnosticoLote(lista = []) {
+  if (!lista.length) return 'Nenhuma equipe encontrada para o filtro atual.';
+  const somenteLote = lista.filter((item) => String(item.comparativo || '').includes('SOMENTE LOTE')).length;
+  const somenteWm = lista.filter((item) => String(item.comparativo || '').includes('SOMENTE WM')).length;
+  const dLote = lista.filter((item) => String(item.faixaLote || '').toUpperCase() === 'D').length;
+  const ranking = obterRankingLotePorSupervisor(lista)[0];
+  return `D Lote: ${formatInt(dLote)} | Somente Lote: ${formatInt(somenteLote)} | Somente WM: ${formatInt(somenteWm)} | supervisor critico: ${ranking?.supervisor || '-'}`;
+}
+
+function renderizarPainelLoteModal(lista = []) {
+  const tableWrap = equipesModal?.querySelector('.andon-modal-table-wrap');
+  if (!tableWrap) return;
+  document.getElementById('andonLoteModalPanel')?.remove();
+  equipesModal?.classList.add('andon-modal-lote');
+  const dLote = lista.filter((item) => String(item.faixaLote || '').toUpperCase() === 'D').length;
+  const wmELote = lista.filter((item) => String(item.comparativo || '').includes('WM E LOTE')).length;
+  const painel = document.createElement('div');
+  painel.id = 'andonLoteModalPanel';
+  painel.className = 'andon-performance-panel';
+  painel.innerHTML = `
+    <div class="andon-performance-toolbar">
+      <label>
+        <span>Busca</span>
+        <input type="search" class="andon-lote-search" value="${escaparHtmlModal(modalLoteEstado.busca || '')}" placeholder="Equipe, supervisor, faixa, comparativo...">
+      </label>
+      <button type="button" class="andon-lote-search-btn">Buscar</button>
+      <button type="button" class="andon-lote-ranking-btn">Ranking</button>
+    </div>
+    <div class="andon-performance-summary">
+      <div><span>Total</span><strong>${formatInt(lista.length)}</strong></div>
+      <div><span>D Lote</span><strong>${formatInt(dLote)}</strong></div>
+      <div><span>WM e Lote</span><strong>${formatInt(wmELote)}</strong></div>
+      <div><span>Somente Lote</span><strong>${formatInt(lista.filter((item) => String(item.comparativo || '').includes('SOMENTE LOTE')).length)}</strong></div>
+      <div><span>Somente WM</span><strong>${formatInt(lista.filter((item) => String(item.comparativo || '').includes('SOMENTE WM')).length)}</strong></div>
+      <div><span>Media % Lote</span><strong>${formatPercent(mediaNumericaAndon(lista.map((item) => Number(item.percentualLote || 0)).filter(Number.isFinite)))}</strong></div>
+    </div>
+    <div class="andon-performance-diagnostic">
+      <span>Diagnostico automatico</span>
+      <strong>${escaparHtmlModal(obterDiagnosticoLote(lista))}</strong>
+    </div>
+  `;
+  tableWrap.insertAdjacentElement('beforebegin', painel);
+  painel.querySelector('.andon-lote-search')?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    modalLoteEstado.busca = event.target.value || '';
+    renderizarListaLoteModal();
+  });
+  painel.querySelector('.andon-lote-search-btn')?.addEventListener('click', () => {
+    modalLoteEstado.busca = painel.querySelector('.andon-lote-search')?.value || '';
+    renderizarListaLoteModal();
+  });
+  painel.querySelector('.andon-lote-ranking-btn')?.addEventListener('click', abrirRankingLoteModal);
+}
+
+function renderizarListaLoteModal() {
+  const lista = obterListaLoteFiltrada();
+  renderCabecalhoModalEquipesDLoteProd();
+  if (equipesModalTitle && modalLoteEstado.title) equipesModalTitle.textContent = modalLoteEstado.title;
+  if (equipesModalMeta && modalLoteEstado.meta) equipesModalMeta.textContent = modalLoteEstado.meta;
+  renderizarPainelLoteModal(lista);
+  renderizarModalBodyEmLotes(
+    lista,
+    (item) => `
+        <tr>
+          <td class="andon-modal-datas" title="${item.data || '-'}">${item.data || '-'}</td>
+          <td class="${item.detalheDiasId && Number(item.diasTrabalhados || 0) > 0 ? 'andon-dias-trab-cell' : ''}" data-dias-id="${item.detalheDiasId || ''}">
+            ${modalLoteEstado.habilitarDetalheDias && item.detalheDiasId && Number(item.diasTrabalhados || 0) > 0
+              ? `<button class="andon-dias-trab-btn" type="button" data-dias-id="${item.detalheDiasId}">${formatInt(item.diasTrabalhados || 0)}</button>`
+              : formatInt(item.diasTrabalhados || 0)}
+          </td>
+          <td>${item.supervisor || '-'}</td>
+          <td>${item.equipe || '-'}</td>
+          <td>${formatNumber3(item.metaWm)}</td>
+          <td>${formatNumber3(item.producaoWm)}</td>
+          <td class="andon-faixa faixa-${item.faixaWm || '-'}">${item.faixaWm || '-'}</td>
+          <td>${formatPercent(item.percentualWm)}</td>
+          <td>${formatNumber3Scale100(item.prodDia)}</td>
+          <td class="andon-faixa faixa-${item.faixaLote || '-'}">${item.faixaLote || '-'}</td>
+          <td>${formatPercent(item.percentualLote)}</td>
+          <td>${item.inicioJornada || '-'}</td>
+          <td>${item.inicioRefeicao || '-'}</td>
+          <td>${item.terminoRefeicao || '-'}</td>
+          <td>${item.primeiroAtendimento || '-'}</td>
+          <td>${item.ultimoAtendimento || '-'}</td>
+          <td>${item.fimJornada || '-'}</td>
+          <td>${item.jornadaProdutiva || '-'}</td>
+          <td>${item.comparativo}</td>
+        </tr>
+      `,
+    '<tr><td colspan="19" class="andon-modal-empty">Nenhuma equipe encontrada no lote produtivo.</td></tr>'
+  );
+  renderizarRodapeModalLoteProd(lista);
+}
+
+function obterRankingLotePorSupervisor(lista = []) {
+  const mapa = new Map();
+  lista.forEach((item) => {
+    const supervisor = String(item.supervisor || '-').trim() || '-';
+    const atual = mapa.get(supervisor) || { supervisor, total: 0, dLote: 0, somenteLote: 0, somaPerc: 0, qtdPerc: 0 };
+    atual.total += 1;
+    if (String(item.faixaLote || '').toUpperCase() === 'D') atual.dLote += 1;
+    if (String(item.comparativo || '').includes('SOMENTE LOTE')) atual.somenteLote += 1;
+    const perc = Number(item.percentualLote || 0);
+    if (Number.isFinite(perc)) {
+      atual.somaPerc += perc;
+      atual.qtdPerc += 1;
+    }
+    mapa.set(supervisor, atual);
+  });
+  return Array.from(mapa.values())
+    .map((item) => ({ ...item, mediaPerc: item.qtdPerc ? item.somaPerc / item.qtdPerc : Number.NaN }))
+    .sort((a, b) => b.dLote - a.dLote || b.somenteLote - a.somenteLote || b.total - a.total);
+}
+
+function abrirRankingLoteModal() {
+  const ranking = obterRankingLotePorSupervisor(obterListaLoteFiltrada());
+  removerPainelPerformanceModal();
+  renderCabecalhoModalGenerico([
+    { label: 'Rank' },
+    { label: 'Supervisor' },
+    { label: 'Total' },
+    { label: 'D Lote' },
+    { label: 'Somente Lote' },
+    { label: '% Medio Lote' }
+  ]);
+  if (equipesModalTitle) equipesModalTitle.textContent = 'Ranking Lote por Supervisor';
+  if (equipesModalMeta) equipesModalMeta.textContent = `Base: ${formatInt(obterListaLoteFiltrada().length)} equipes`;
+  configurarBotaoVoltarModalEquipes({ tipoContexto: 'lote-lista' });
+  renderizarModalBodyEmLotes(
+    ranking,
+    (item, index) => `
+      <tr>
+        <td>${formatInt(index + 1)}</td>
+        <td>${escaparHtmlModal(item.supervisor || '-')}</td>
+        <td>${formatInt(item.total)}</td>
+        <td>${formatInt(item.dLote)}</td>
+        <td>${formatInt(item.somenteLote)}</td>
+        <td>${Number.isFinite(item.mediaPerc) ? formatPercent(item.mediaPerc) : '-'}</td>
+      </tr>
+    `,
+    '<tr><td colspan="6" class="andon-modal-empty">Nenhum ranking encontrado.</td></tr>'
+  );
+}
+
 function abrirModalLoteProdDetalhes() {
+  abrirModalEquipesDLoteProd({
+    somenteD: false,
+    title: 'Classificação Lote Prod.',
+    meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Visão consolidada por equipe`
+  });
+  return;
+
   const codigosUoAtual = obterCodigosEquipesUoAtual();
   const rows = filtrarLoteProdEquipesRowsAndon().filter((row) => {
     if (!codigosUoAtual) return true;
@@ -2022,22 +3138,50 @@ function obterResumoEquipesHoraAtual(rows = []) {
   const horasDisponiveis = [...new Set(rows.map(obterHoraLinha).filter((hora) => ANDON_FAIXAS.includes(hora)))].sort();
   const horaAtual = horasDisponiveis.length ? horasDisponiveis[horasDisponiveis.length - 1] : '17';
   const horasAcumuladas = obterHorasAcumuladasAndon(horaAtual);
+  const horaPorData = new Map();
   const mapa = new Map();
+
+  if (filtroPeriodoMultiDiaAtivo()) {
+    obterMetricasReportPorEquipe(rows).forEach((item, codigo) => {
+      mapa.set(codigo, {
+        metaDia: Number(item.metaDia || 0),
+        prodAtual: Number(item.prodDia || 0)
+      });
+    });
+    return { horaAtual, horasAcumuladas, mapa };
+  }
+
+  rows.forEach((row) => {
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA'])) || 'sem-data';
+    const hora = obterHoraLinha(row);
+    if (!ANDON_FAIXAS.includes(hora)) return;
+    const atual = horaPorData.get(dataIso);
+    if (!atual || hora > atual) horaPorData.set(dataIso, hora);
+  });
 
   rows.forEach((row) => {
     const codigo = obterCodigoEquipeLinha(row);
-    if (!codigo || obterHoraLinha(row) !== horaAtual) return;
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA'])) || 'sem-data';
+    const horaLinha = obterHoraLinha(row);
+    const horaReferencia = filtroPeriodoMultiDiaAtivo()
+      ? (horaPorData.get(dataIso) || horaAtual)
+      : horaAtual;
+    if (!codigo || horaLinha !== horaReferencia) return;
 
     const atual = mapa.get(codigo) || { metaDia: 0, prodAtual: 0 };
-    atual.metaDia = Math.max(
-      atual.metaDia,
-      ajustarMetaClusterMtamiAndon(
-        toNumberSafe(obterValorPrimeiro(row, ['Meta Prog.', 'META PROG', 'META_PROG'])),
-        obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']),
-        obterValorPrimeiro(row, ['Nome', 'NOME_EQUIPE', 'NOME'])
-      )
+    const metaLinha = ajustarMetaComFallbackNomenclatura(
+      toNumberSafe(obterValorPrimeiro(row, ['Meta Prog.', 'META PROG', 'META_PROG'])),
+      obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']),
+      obterValorPrimeiro(row, ['Nome', 'NOME_EQUIPE', 'NOME'])
     );
-    atual.prodAtual = Math.max(atual.prodAtual, toNumberSafe(obterValorPrimeiro(row, ['Produção', 'PRODUÇÃO', 'PRODUCAO'])));
+    const prodLinha = toNumberSafe(obterValorPrimeiro(row, ['Produção', 'PRODUÇÃO', 'PRODUCAO']));
+    if (filtroPeriodoMultiDiaAtivo()) {
+      atual.metaDia += metaLinha;
+      atual.prodAtual += prodLinha;
+    } else {
+      atual.metaDia = Math.max(atual.metaDia, metaLinha);
+      atual.prodAtual = Math.max(atual.prodAtual, prodLinha);
+    }
     mapa.set(codigo, atual);
   });
 
@@ -2046,7 +3190,8 @@ function obterResumoEquipesHoraAtual(rows = []) {
 
 function montarLinhasModalEquipes(rows = [], filtro = 'todas', controleRows = null, options = {}) {
   const agruparPorData = Boolean(options.agruparPorData);
-  const baseTotal = obterEquipesDBaseTotal(rows);
+  const rowsBaseModal = options.apenasComInicioJornada ? filtrarReportRowsPorDiasComInicioJornada(rows) : rows;
+  const baseTotal = obterEquipesDBaseTotal(rowsBaseModal);
   const mapaControle = new Map();
   const codigosAcordadas = filtro === 'acordadas' ? obterCodigosSdcaPorTipo(rows, 'acordadas') : null;
   const codigosJustificadas = filtro === 'justificadas' ? obterCodigosSdcaPorTipo(rows, 'justificadas') : null;
@@ -2099,7 +3244,7 @@ function montarLinhasModalEquipes(rows = [], filtro = 'todas', controleRows = nu
 
   const mapa = new Map();
   const mapaFimJornadaReport = new Map();
-  rows.forEach((row) => {
+  rowsBaseModal.forEach((row) => {
     const codigo = obterCodigoEquipeLinha(row);
     if (!codigo) return;
     const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
@@ -2131,7 +3276,7 @@ function montarLinhasModalEquipes(rows = [], filtro = 'todas', controleRows = nu
 
     atual.metaDia = Math.max(
       atual.metaDia,
-      ajustarMetaClusterMtamiAndon(
+      ajustarMetaComFallbackNomenclatura(
         toNumberSafe(obterValorPrimeiro(row, ['Meta Prog.', 'META PROG', 'META_PROG'])),
         obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']),
         obterValorPrimeiro(row, ['Nome', 'NOME_EQUIPE', 'NOME'])
@@ -2206,7 +3351,48 @@ function montarLinhasModalEquipes(rows = [], filtro = 'todas', controleRows = nu
       fimJornada: fimJornada || ultimoAtendimento || '-',
       jornadaProdutiva
     };
-  }).filter((item) => {
+  }).map((item) => {
+    if (agruparPorData || !filtroPeriodoMultiDiaAtivo() || Number(item.diasTrabalhados || 0) <= 1) {
+      return item;
+    }
+
+    const codigo = String(item.codigo || '').trim();
+    const datas = new Set((item.datas || []).map((data) => normalizarDataIso(data)).filter(Boolean));
+    if (!codigo || !datas.size) return item;
+
+    const rowsEquipe = rowsBaseModal.filter((row) => {
+      const codigoRow = String(obterCodigoEquipeLinha(row) || '').trim();
+      const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+      return codigoRow === codigo && datas.has(dataIso);
+    });
+    const controleEquipe = controleRowsBase.filter((row) => {
+      const codigoRow = String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim();
+      const dataIso = obterDataControleLinha(row);
+      return codigoRow === codigo && datas.has(dataIso);
+    });
+    const linhasDias = montarLinhasModalEquipes(rowsEquipe, 'todas', controleEquipe, { agruparPorData: true });
+    if (!linhasDias.length) return item;
+
+    const resumo = obterResumoRodapeModalEquipes(linhasDias);
+    const metaPeriodo = toNumberSafe(resumo.meta);
+    const prodPeriodo = toNumberSafe(resumo.producao);
+    const percProdDia = metaPeriodo > 0 ? (prodPeriodo / metaPeriodo) * 100 : 0;
+
+    return {
+      ...item,
+      metaDia: metaPeriodo,
+      prodDia: prodPeriodo,
+      percProdDia,
+      faixaDia: classificarFaixa(percProdDia),
+      inicioJornada: resumo.inicioJornada,
+      inicioRefeicao: resumo.inicioRefeicao,
+      terminoRefeicao: resumo.terminoRefeicao,
+      primeiroAtendimento: resumo.primeiroAtendimento,
+      ultimoAtendimento: resumo.ultimoAtendimento,
+      fimJornada: resumo.fimJornada,
+      jornadaProdutiva: resumo.jornadaProdutiva
+    };
+  }).filter(itemEquipeDeveAparecerModal).filter((item) => {
     const codigo = String(item.codigo || '');
     if (filtro === 'd') return baseTotal.equipesD.has(codigo);
     if (filtro === 'acordadas') return codigosAcordadas && codigosAcordadas.has(codigo);
@@ -2235,14 +3421,19 @@ function abrirModalEquipesAndonContexto({
   meta = '',
   agruparPorData = false,
   habilitarDetalheDias = true,
-  voltarContexto = null
+  voltarContexto = null,
+  modalFiltros = null,
+  apenasComInicioJornada = false,
+  tipoModal = ''
 } = {}) {
   if (!equipesModal || !equipesModalBody) return;
   aplicarModalTelaCheia(true);
+  const modalPerformance = tipoModal === 'performance';
   equipesModal.classList.toggle('andon-modal-detalhe-datas', Boolean(agruparPorData));
-  renderCabecalhoModalEquipesPadrao();
+  renderCabecalhoModalEquipesPadrao({ comHistorico: modalPerformance });
 
-  const lista = montarLinhasModalEquipes(rows, filtro, controleRows, { agruparPorData });
+  const rowsModal = apenasComInicioJornada ? filtrarReportRowsComInicioJornada(rows) : rows;
+  const lista = montarLinhasModalEquipes(rowsModal, filtro, controleRows, { agruparPorData, apenasComInicioJornada });
   const titulo = title || (
     filtro === 'd'
       ? 'Equipes D WM'
@@ -2266,43 +3457,57 @@ function abrirModalEquipesAndonContexto({
       item.detalheDiasId = detalheId;
       modalDetalheEquipesDias.set(detalheId, {
         item,
-        rows,
+        rows: rowsModal,
         controleRows,
         filtro,
         tituloOrigem: titulo,
-        metaOrigem: metaTexto
+        metaOrigem: metaTexto,
+        apenasComInicioJornada,
+        tipoModal
       });
     });
   }
 
-  renderizarModalBodyEmLotes(
-    lista,
-    (item) => `
-      <tr>
-        <td class="andon-modal-datas" title="${item.data || '-'}">${item.data || '-'}</td>
-        <td class="${habilitarDetalheDias && Number(item.diasTrabalhados || 0) > 0 ? 'andon-dias-trab-cell' : ''}" data-dias-id="${habilitarDetalheDias ? item.detalheDiasId || '' : ''}">${
-          habilitarDetalheDias && Number(item.diasTrabalhados || 0) > 0
-            ? `<button class="andon-dias-trab-btn" type="button" data-dias-id="${item.detalheDiasId}">${formatInt(item.diasTrabalhados || 0)}</button>`
-            : formatInt(item.diasTrabalhados || 0)
-        }</td>
-        <td>${item.supervisor || '-'}</td>
-        <td>${item.equipe}</td>
-        <td>${formatNumber3(item.metaDia)}</td>
-        <td>${formatNumber3(item.prodDia)}</td>
-        <td class="andon-faixa faixa-${item.faixaDia || '-'}">${item.faixaDia || '-'}</td>
-        <td>${formatPercent(item.percProdDia || 0)}</td>
-        <td>${item.inicioJornada || '-'}</td>
-        <td>${item.inicioRefeicao || '-'}</td>
-        <td>${item.terminoRefeicao || '-'}</td>
-        <td>${item.primeiroAtendimento || '-'}</td>
-        <td>${item.ultimoAtendimento || '-'}</td>
-        <td>${item.fimJornada || '-'}</td>
-        <td>${item.jornadaProdutiva || '-'}</td>
-      </tr>
-    `,
-    `<tr><td colspan="15" class="andon-modal-empty">Nenhuma equipe encontrada para este filtro.</td></tr>`
-  );
-  renderizarRodapeModalEquipes(lista);
+  if (modalPerformance) {
+    modalPerformanceEstado = {
+      lista,
+      rows: rowsModal,
+      controleRows,
+      contexto: { filtro, title: titulo, meta: metaTexto, habilitarDetalheDias, apenasComInicioJornada },
+      busca: ''
+    };
+    renderizarListaPerformanceModal();
+  } else {
+    renderizarModalBodyEmLotes(
+      lista,
+      (item) => `
+        <tr>
+          <td class="andon-modal-datas" title="${item.data || '-'}">${item.data || '-'}</td>
+          <td class="${habilitarDetalheDias && Number(item.diasTrabalhados || 0) > 0 ? 'andon-dias-trab-cell' : ''}" data-dias-id="${habilitarDetalheDias ? item.detalheDiasId || '' : ''}">${
+            habilitarDetalheDias && Number(item.diasTrabalhados || 0) > 0
+              ? `<button class="andon-dias-trab-btn" type="button" data-dias-id="${item.detalheDiasId}">${formatInt(item.diasTrabalhados || 0)}</button>`
+              : formatInt(item.diasTrabalhados || 0)
+          }</td>
+          <td>${item.supervisor || '-'}</td>
+          <td>${item.equipe}</td>
+          <td>${formatNumber3(item.metaDia)}</td>
+          <td>${formatNumber3(item.prodDia)}</td>
+          <td class="andon-faixa faixa-${item.faixaDia || '-'}">${item.faixaDia || '-'}</td>
+          <td>${formatPercent(item.percProdDia || 0)}</td>
+          <td>${item.inicioJornada || '-'}</td>
+          <td>${item.inicioRefeicao || '-'}</td>
+          <td>${item.terminoRefeicao || '-'}</td>
+          <td>${item.primeiroAtendimento || '-'}</td>
+          <td>${item.ultimoAtendimento || '-'}</td>
+          <td>${item.fimJornada || '-'}</td>
+          <td>${item.jornadaProdutiva || '-'}</td>
+        </tr>
+      `,
+      `<tr><td colspan="15" class="andon-modal-empty">Nenhuma equipe encontrada para este filtro.</td></tr>`
+    );
+    renderizarRodapeModalEquipes(lista);
+  }
+  restaurarFiltrosModalQuandoPronto(modalFiltros);
 
   equipesModal.classList.remove('hidden');
 }
@@ -2315,16 +3520,41 @@ function abrirModalDetalheDiasTrabalhadosLoteProd(detalhe) {
   if (!detalhe || !detalhe.item) return;
   const codigo = String(detalhe.item.codigo || '').trim();
   const datas = new Set((detalhe.item.datas || []).map((data) => normalizarDataIso(data)).filter(Boolean));
-  if (!codigo || !datas.size) return;
+  if (!codigo) return;
+
+  const reportRowsEquipe = (Array.isArray(detalhe.reportRows) ? detalhe.reportRows : []).filter((row) => {
+    const codigoRow = String(obterCodigoEquipeLinha(row) || '').trim();
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+    if (codigoRow === codigo && dataIso) datas.add(dataIso);
+    return codigoRow === codigo;
+  });
+
+  if (!datas.size) return;
 
   const rowsEquipe = (Array.isArray(detalhe.rows) ? detalhe.rows : []).filter((row) => {
     const codigoRow = obterCodigoEquipeLote(row);
     const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
     return codigoRow === codigo && datas.has(dataIso);
   });
+  const datasComLote = new Set(rowsEquipe.map((row) => normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']))).filter(Boolean));
+  const rowsSomenteWm = Array.from(datas)
+    .filter((dataIso) => !datasComLote.has(dataIso))
+    .map((dataIso) => {
+      const reportRow = reportRowsEquipe.find((row) => normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data'])) === dataIso) || {};
+      return {
+        DATA: dataIso,
+        COD_EQUIPE: codigo,
+        NOME_EQUIPE: detalhe.item.equipe || obterValorPrimeiro(reportRow, ['Nome', 'NOME_EQUIPE', 'NOME']) || codigo,
+        NOME_SUPERVISOR: detalhe.item.supervisor || obterValorPrimeiro(reportRow, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR', 'SUPERVISOR_EQUIPE']) || '-',
+        META: 0,
+        VALOR_US: 0,
+        FAIXA_DIA: '-',
+        _SOMENTE_WM: true
+      };
+    });
 
   abrirModalEquipesDLoteProd({
-    rows: rowsEquipe,
+    rows: [...rowsEquipe, ...rowsSomenteWm],
     reportRows: detalhe.reportRows,
     somenteD: false,
     title: `Dias Trabalhados - ${detalhe.item.equipe || codigo}`,
@@ -2333,7 +3563,8 @@ function abrirModalDetalheDiasTrabalhadosLoteProd(detalhe) {
     habilitarDetalheDias: false,
     voltarContexto: {
       tipoContexto: 'lote-prod',
-      options: detalhe.origemOptions || {
+      options: {
+        ...(detalhe.origemOptions || {
         rows: detalhe.rows,
         reportRows: detalhe.reportRows,
         somenteD: detalhe.somenteD,
@@ -2341,6 +3572,8 @@ function abrirModalDetalheDiasTrabalhadosLoteProd(detalhe) {
         meta: detalhe.meta,
         agruparPorData: false,
         habilitarDetalheDias: true
+        }),
+        modalFiltros: detalhe.filtrosOrigem || null
       }
     }
   });
@@ -2349,12 +3582,18 @@ function abrirModalDetalheDiasTrabalhadosLoteProd(detalhe) {
 function abrirModalDetalheDiasTrabalhadosEquipe(detalheId) {
   const detalhe = modalDetalheEquipesDias.get(String(detalheId || ''));
   if (!detalhe || !detalhe.item) return;
+  const filtrosOrigem = capturarFiltrosModalAtual();
+  detalhe.filtrosOrigem = filtrosOrigem;
   if (detalhe.tipoDetalhe === 'controle-servico') {
     abrirModalControleServicoDetalheDias(detalhe);
     return;
   }
   if (detalhe.tipoDetalhe === 'lote-prod') {
     abrirModalDetalheDiasTrabalhadosLoteProd(detalhe);
+    return;
+  }
+  if (detalhe.tipoDetalhe === 'equipes-acordadas') {
+    abrirModalDetalheDiasAcordados(detalhe);
     return;
   }
 
@@ -2390,7 +3629,9 @@ function abrirModalDetalheDiasTrabalhadosEquipe(detalheId) {
       title: detalhe.tituloOrigem || '',
       meta: detalhe.metaOrigem || '',
       agruparPorData: false,
-      habilitarDetalheDias: true
+      habilitarDetalheDias: true,
+      modalFiltros: filtrosOrigem,
+      apenasComInicioJornada: Boolean(detalhe.apenasComInicioJornada)
     }
   });
 }
@@ -2415,18 +3656,22 @@ function contarDiasTrabalhadosAndon(datas = []) {
   )).length;
 }
 
-function calcularResumoServicos13hPorEquipe(controleRows = []) {
+function calcularResumoServicos13hPorEquipe(controleRows = [], options = {}) {
+  const agruparPorData = Boolean(options.agruparPorData);
+  const obterChaveEquipe = (codigo, dataIso = '') => agruparPorData && dataIso ? `${codigo}__${dataIso}` : codigo;
   const limite13h = 13 * 60;
   const mapa = new Map();
 
   controleRows.forEach((row) => {
     const codigo = String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim();
     if (!codigo) return;
+    const dataIso = obterDataControleLinha(row);
+    const chave = obterChaveEquipe(codigo, dataIso);
 
     const horaDesignacao = horaParaMinutos(obterValorPrimeiro(row, ['DATA_DESIGNACAO', 'DESIGNACAO', 'DATA DESIGNACAO', 'DATA_ATUALIZACAO']));
     if (!Number.isFinite(horaDesignacao) || horaDesignacao > limite13h) return;
 
-    const item = mapa.get(codigo) || {
+    const item = mapa.get(chave) || {
       designados: 0,
       servicos: 0,
       produtivos: 0,
@@ -2439,32 +3684,56 @@ function calcularResumoServicos13hPorEquipe(controleRows = []) {
     if (flag === 'SIM') item.produtivos += 1;
     if (flag === 'NAO') item.improdutivos += 1;
 
-    mapa.set(codigo, item);
+    mapa.set(chave, item);
   });
 
   return mapa;
 }
 
-function montarLinhasModalEquipesAcordadas(reportRows = filtrarReportRowsAndon(), controleRows = filtrarControleRowsAndon(), tipo = 'acordadas') {
+function montarLinhasModalEquipesAcordadas(reportRows = filtrarReportRowsAndon(), controleRows = filtrarControleRowsAndon(), tipo = 'acordadas', options = {}) {
+  const agruparPorData = Boolean(options.agruparPorData);
+  const obterChaveEquipe = (codigo, dataIso = '') => agruparPorData && dataIso ? `${codigo}__${dataIso}` : codigo;
+  reportRows = filtrarReportRowsComInicioJornada(reportRows);
   const codigosSdca = obterCodigosSdcaPorTipo(reportRows, tipo);
   const mapaJustificativas = new Map();
-  if (tipo === 'justificadas') {
-    const { mapa: mapaHoraAtual } = obterResumoEquipesHoraAtual(reportRows);
-    const codigosVisiveis = new Set(Array.from(mapaHoraAtual.keys()).map((codigo) => String(codigo)));
-    obterRegistrosSdcaAndon(codigosVisiveis).forEach((registro) => {
+  const mapaDatasAcordadas = new Map();
+  const adicionarDataAcordada = (codigo, dataIso) => {
+    const codigoTexto = String(codigo || '').trim();
+    const dataTexto = normalizarDataIso(dataIso);
+    if (!codigoTexto || !dataTexto) return;
+    if (!mapaDatasAcordadas.has(codigoTexto)) mapaDatasAcordadas.set(codigoTexto, new Set());
+    mapaDatasAcordadas.get(codigoTexto).add(dataTexto);
+  };
+
+  const { mapa: mapaHoraAtual } = obterResumoEquipesHoraAtual(reportRows);
+  const codigosVisiveis = new Set(Array.from(mapaHoraAtual.keys()).map((codigo) => String(codigo)));
+  obterRegistrosSdcaAndon(codigosVisiveis).forEach((registro) => {
+    const dataRegistro = normalizarDataIso(registro && registro.data);
+    Object.values(registro && registro.acordos || {}).forEach((item) => {
+      const codigo = String(item && item.codigo || '').trim();
+      if (codigo && codigosSdca.has(codigo)) adicionarDataAcordada(codigo, dataRegistro);
+    });
+    if (tipo === 'justificadas') {
       Object.values(registro && registro.justificativas || {}).forEach((item) => {
         const codigo = String(item && item.codigo || '').trim();
         const texto = String(item && item.justificativa || '').trim();
-        if (codigo && texto && codigosSdca.has(codigo)) mapaJustificativas.set(codigo, texto);
+        if (codigo && texto && codigosSdca.has(codigo)) {
+          mapaJustificativas.set(codigo, texto);
+          adicionarDataAcordada(codigo, dataRegistro);
+        }
       });
-    });
-  }
+    }
+  });
   const mapaJornada = new Map(
-    montarLinhasModalEquipes(reportRows, 'todas', controleRows)
-      .map((item) => [String(item.codigo || '').trim(), item])
+    montarLinhasModalEquipes(reportRows, 'todas', controleRows, { agruparPorData })
+      .map((item) => {
+        const codigo = String(item.codigo || '').trim();
+        const dataIso = normalizarDataIso(item.datas && item.datas[0]);
+        return [obterChaveEquipe(codigo, dataIso), item];
+      })
       .filter(([codigo]) => Boolean(codigo))
   );
-  const mapaServicos13h = calcularResumoServicos13hPorEquipe(controleRows);
+  const mapaServicos13h = calcularResumoServicos13hPorEquipe(controleRows, { agruparPorData });
   const mapa = new Map();
   const horas13 = obterHorasAcumuladasAndon('13');
 
@@ -2475,7 +3744,7 @@ function montarLinhasModalEquipesAcordadas(reportRows = filtrarReportRowsAndon()
     const supervisor = String(obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']) || '-').trim() || '-';
     const equipe = String(obterValorPrimeiro(row, ['Nome', 'NOME_EQUIPE', 'NOME']) || codigo || '-').trim() || '-';
     const frota = String(obterValorPrimeiro(row, ['FROTA', 'Frota', 'PREFIXO', 'Prefixo', 'PLACA', 'Placa']) || '-').trim() || '-';
-    const metaLinha = ajustarMetaClusterMtamiAndon(
+    const metaLinha = ajustarMetaComFallbackNomenclatura(
       toNumberSafe(obterValorPrimeiro(row, ['Meta Prog.', 'META PROG', 'META_PROG'])),
       supervisor,
       equipe
@@ -2483,8 +3752,9 @@ function montarLinhasModalEquipesAcordadas(reportRows = filtrarReportRowsAndon()
     const producaoLinha = toNumberSafe(obterValorPrimeiro(row, ['Produção', 'ProduÃ§Ã£o', 'PRODUÇÃO', 'PRODUÃ‡ÃƒO', 'PRODUCAO']));
     const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA']));
     const hora = obterHoraLinha(row);
+    const chaveEquipe = obterChaveEquipe(codigo, dataIso);
 
-    const atual = mapa.get(codigo) || {
+    const atual = mapa.get(chaveEquipe) || {
       codigo,
       dataIso: '',
       supervisor,
@@ -2503,12 +3773,16 @@ function montarLinhasModalEquipesAcordadas(reportRows = filtrarReportRowsAndon()
     atual.prodDia = Math.max(atual.prodDia, producaoLinha);
     if (hora === '13') atual.prod13 = Math.max(atual.prod13, producaoLinha);
 
-    mapa.set(codigo, atual);
+    mapa.set(chaveEquipe, atual);
   });
 
   return Array.from(mapa.values()).map((item) => {
-    const jornada = mapaJornada.get(String(item.codigo || '').trim()) || {};
-    const servicos13h = mapaServicos13h.get(String(item.codigo || '').trim()) || {
+    const jornada = mapaJornada.get(obterChaveEquipe(String(item.codigo || '').trim(), normalizarDataIso(item.dataIso)))
+      || mapaJornada.get(String(item.codigo || '').trim())
+      || {};
+    const servicos13h = mapaServicos13h.get(obterChaveEquipe(String(item.codigo || '').trim(), normalizarDataIso(item.dataIso)))
+      || mapaServicos13h.get(String(item.codigo || '').trim())
+      || {
       designados: 0,
       servicos: 0,
       produtivos: 0,
@@ -2531,7 +3805,13 @@ function montarLinhasModalEquipesAcordadas(reportRows = filtrarReportRowsAndon()
       percDia,
       servicos13h,
       percImprod13,
-      justificativa: mapaJustificativas.get(String(item.codigo || '').trim()) || '-',
+      datasAcordadas: agruparPorData
+        ? [item.dataIso].filter(Boolean)
+        : Array.from(mapaDatasAcordadas.get(String(item.codigo || '').trim()) || []).sort(),
+      diasAcordados: agruparPorData
+        ? 1
+        : (mapaDatasAcordadas.get(String(item.codigo || '').trim()) || new Set()).size,
+      justificativa: separarGrupoDescricaoJustificativa(mapaJustificativas.get(String(item.codigo || '').trim()) || '-').justificativa || '-',
       inicioJornada: jornada.inicioJornada || '-',
       primeiroAtendimento: jornada.primeiroAtendimento || '-',
       ultimoAtendimento: jornada.ultimoAtendimento || '-',
@@ -2555,6 +3835,7 @@ function abrirModalEquipesAcordadasDetalhado() {
 
   renderCabecalhoModalGenerico([
     { label: 'DATA' },
+    { label: 'Dias Acordados' },
     { label: 'SUPERVISOR' },
     { label: 'Equipes' },
     { label: 'Meta' },
@@ -2584,11 +3865,29 @@ function abrirModalEquipesAcordadasDetalhado() {
     equipesModalMeta.textContent = `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(rows.length)}`;
   }
 
+  modalDetalheEquipesDias = new Map();
+  rows.forEach((row, index) => {
+    const detalheId = `acordadas-${Date.now()}-${index}`;
+    row.detalheDiasAcordadosId = detalheId;
+    modalDetalheEquipesDias.set(detalheId, {
+      tipoDetalhe: 'equipes-acordadas',
+      item: row,
+      rows: reportRows,
+      controleRows,
+      tituloOrigem: 'Equipes Acordadas'
+    });
+  });
+
   renderizarModalBodyEmLotes(
     rows,
     (row) => `
       <tr>
-        <td>${formatarDataBrAndon(row.dataIso)}</td>
+        <td>${formatarSequenciaDatasAndon(row.datasAcordadas && row.datasAcordadas.length ? row.datasAcordadas : [row.dataIso])}</td>
+        <td class="andon-dias-trab-cell" data-dias-id="${row.detalheDiasAcordadosId || ''}">${
+          Number(row.diasAcordados || 0) > 0
+            ? `<button class="andon-dias-trab-btn" type="button" data-dias-id="${row.detalheDiasAcordadosId || ''}">${formatInt(row.diasAcordados || 0)}</button>`
+            : '0'
+        }</td>
         <td>${row.supervisor || '-'}</td>
         <td>${row.equipe || '-'}</td>
         <td>${formatNumber3(row.metaDia)}</td>
@@ -2613,25 +3912,1080 @@ function abrirModalEquipesAcordadasDetalhado() {
         <td>${row.jornadaProdutiva || '-'}</td>
       </tr>
     `,
-    '<tr><td colspan="23" class="andon-modal-empty">Nenhuma equipe acordada encontrada para o filtro atual.</td></tr>'
+    '<tr><td colspan="24" class="andon-modal-empty">Nenhuma equipe acordada encontrada para o filtro atual.</td></tr>'
   );
 
   equipesModal.classList.remove('hidden');
 }
 
-function abrirModalEquipesJustificadasDetalhado() {
-  if (!equipesModal || !equipesModalBody) return;
-  aplicarModalTelaCheia(true);
+function abrirModalDetalheDiasAcordados(detalhe) {
+  if (!detalhe || !detalhe.item) return;
+  const codigo = String(detalhe.item.codigo || '').trim();
+  const datas = new Set((detalhe.item.datasAcordadas || []).map((data) => normalizarDataIso(data)).filter(Boolean));
+  if (!codigo || !datas.size) return;
 
-  const reportRows = filtrarReportRowsAndon();
-  const controleRows = filtrarControleRowsAndon();
-  const rows = montarLinhasModalEquipesAcordadas(reportRows, controleRows, 'justificadas');
+  const reportRows = (Array.isArray(detalhe.rows) ? detalhe.rows : []).filter((row) => {
+    const codigoRow = String(obterCodigoEquipeLinha(row) || '').trim();
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['DATA', 'Data']));
+    return codigoRow === codigo && datas.has(dataIso);
+  });
+  const controleRows = (Array.isArray(detalhe.controleRows) ? detalhe.controleRows : filtrarControleRowsAndon()).filter((row) => {
+    const codigoRow = String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim();
+    const dataIso = obterDataControleLinha(row);
+    return codigoRow === codigo && datas.has(dataIso);
+  });
+  const rows = montarLinhasModalEquipesAcordadas(reportRows, controleRows, 'acordadas', { agruparPorData: true });
+
+  renderCabecalhoModalGenerico([
+    { label: 'DATA' },
+    { label: 'Dias Acordados' },
+    { label: 'SUPERVISOR' },
+    { label: 'Equipes' },
+    { label: 'Meta' },
+    { label: 'ProduÃ§Ã£o' },
+    { label: 'Faixa 13H' },
+    { label: '% PROD.DIA 13 H' },
+    { label: 'PrevisÃ£o ProduÃ§Ã£o' },
+    { label: 'PrevisÃ£o %Meta' },
+    { label: 'PrevisÃ£o Faixa Dia' },
+    { label: 'ProduÃ§Ã£o' },
+    { label: 'Faixa Dia' },
+    { label: '% PROD.DIA' },
+    { label: 'Designados 13H' },
+    { label: 'ServiÃ§os 13H' },
+    { label: 'Produtivos 13 H' },
+    { label: 'Improdutivos 13 H' },
+    { label: '% IMPROD. 13 H' },
+    { label: 'InÃ­cio Jornada' },
+    { label: '1Âº Atendimento' },
+    { label: 'Ãšlt. Atendimento' },
+    { label: 'Fim Jornada' },
+    { label: 'Jornada Produtiva' }
+  ]);
+
+  if (equipesModalTitle) equipesModalTitle.textContent = `Dias Acordados - ${detalhe.item.equipe || codigo}`;
+  if (equipesModalMeta) {
+    equipesModalMeta.textContent = `Equipe: ${detalhe.item.equipe || '-'} | Datas: ${formatInt(datas.size)} | Origem: ${detalhe.tituloOrigem || '-'}`;
+  }
+  configurarBotaoVoltarModalEquipes({ tipoContexto: 'equipes-acordadas' });
+
+  renderizarModalBodyEmLotes(
+    rows,
+    (row) => `
+      <tr>
+        <td>${formatarDataBrAndon(row.dataIso)}</td>
+        <td>${formatInt(row.diasAcordados || 1)}</td>
+        <td>${row.supervisor || '-'}</td>
+        <td>${row.equipe || '-'}</td>
+        <td>${formatNumber3(row.metaDia)}</td>
+        <td>${formatNumber3(row.prod13)}</td>
+        <td class="andon-faixa faixa-${row.faixa13 || '-'}">${row.faixa13 || '-'}</td>
+        <td>${formatPercent(row.perc13 || 0)}</td>
+        <td>${formatNumber3(row.previsaoProducao)}</td>
+        <td>${formatPercent(row.previsaoPercentual || 0)}</td>
+        <td class="andon-faixa faixa-${row.previsaoFaixaDia || '-'}">${row.previsaoFaixaDia || '-'}</td>
+        <td>${formatNumber3(row.prodDia)}</td>
+        <td class="andon-faixa faixa-${row.faixaDia || '-'}">${row.faixaDia || '-'}</td>
+        <td>${formatPercent(row.percDia || 0)}</td>
+        <td>${formatInt(row.servicos13h.designados)}</td>
+        <td>${formatInt(row.servicos13h.servicos)}</td>
+        <td>${formatInt(row.servicos13h.produtivos)}</td>
+        <td>${formatInt(row.servicos13h.improdutivos)}</td>
+        <td>${formatPercent(row.percImprod13 || 0)}</td>
+        <td>${row.inicioJornada || '-'}</td>
+        <td>${row.primeiroAtendimento || '-'}</td>
+        <td>${row.ultimoAtendimento || '-'}</td>
+        <td>${row.fimJornada || '-'}</td>
+        <td>${row.jornadaProdutiva || '-'}</td>
+      </tr>
+    `,
+    '<tr><td colspan="24" class="andon-modal-empty">Nenhum dia acordado encontrado para esta equipe.</td></tr>'
+  );
+
+  equipesModal.classList.remove('hidden');
+}
+
+function separarGrupoDescricaoJustificativa(texto) {
+  const valor = String(texto || '').trim();
+  if (!valor || valor === '-') return { grupo: '-', grupos: ['-'], descricao: '-', justificativa: '-', vozes: [] };
+  const segmentosCompostos = valor
+    .split(/\s+\+\s+/g)
+    .map((segmento) => segmento.trim())
+    .filter(Boolean);
+  if (segmentosCompostos.filter((segmento) => /\s+-\s+/.test(segmento)).length > 1) {
+    const vozes = [];
+    let grupoAtual = '-';
+    segmentosCompostos.forEach((segmento) => {
+      const partesSegmento = segmento.split(/\s+-\s+/);
+      let textoVoz = segmento;
+      if (partesSegmento.length > 1) {
+        grupoAtual = partesSegmento.shift().trim() || grupoAtual;
+        textoVoz = partesSegmento.join(' - ').trim();
+      }
+      const matchDescricaoJustificativa = textoVoz.match(/^([^:]+):\s*(.+)$/);
+      vozes.push({
+        grupo: grupoAtual,
+        descricao: matchDescricaoJustificativa ? matchDescricaoJustificativa[1].trim() || '-' : textoVoz || '-',
+        justificativa: matchDescricaoJustificativa ? matchDescricaoJustificativa[2].trim() || '-' : '-'
+      });
+    });
+    const grupos = Array.from(new Set(vozes.map((voz) => voz.grupo).filter(Boolean)));
+    const descricoes = Array.from(new Set(vozes.map((voz) => voz.descricao).filter(Boolean)));
+    const justificativas = Array.from(new Set(vozes.map((voz) => voz.justificativa).filter((valor) => valor && valor !== '-')));
+    return {
+      grupo: grupos.length ? grupos.join(' + ') : '-',
+      grupos: grupos.length ? grupos : ['-'],
+      descricao: descricoes.length ? descricoes.join(' + ') : '-',
+      justificativa: justificativas.length ? justificativas.join(' + ') : '-',
+      vozes
+    };
+  }
+  const partes = valor.split(/\s+-\s+/);
+  const grupoTexto = partes.length <= 1 ? valor : partes.shift().trim() || '-';
+  const grupos = grupoTexto
+    .split(/\s*(?:\+|;|\|)\s*/g)
+    .map((grupo) => grupo.trim())
+    .filter(Boolean);
+  const textoDepoisGrupo = partes.length ? partes.join(' - ').trim() : '-';
+  const matchDescricaoJustificativa = textoDepoisGrupo.match(/^([^:]+):\s*(.+)$/);
+  const descricao = matchDescricaoJustificativa
+    ? matchDescricaoJustificativa[1].trim() || '-'
+    : textoDepoisGrupo || '-';
+  const justificativa = matchDescricaoJustificativa
+    ? matchDescricaoJustificativa[2].trim() || '-'
+    : '-';
+  const descricoes = descricao
+    .split(/\s*(?:\+|;|\|)\s*/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  let vozes = [];
+  if (grupos.length > 1 && descricoes.length > 1) {
+    vozes = parearGruposDescricoesJustificadas(grupos, descricoes, justificativa);
+  } else if (grupos.length > 1 && descricoes.length === 1) {
+    const grupoDescricao = escolherGrupoDescricaoJustificada(grupos, descricoes[0]);
+    vozes = [{
+      grupo: grupoDescricao,
+      descricao: descricoes[0],
+      justificativa
+    }];
+  } else {
+    vozes = grupos.flatMap((grupo) =>
+      (descricoes.length ? descricoes : ['-']).map((descricaoItem) => ({
+      grupo,
+      descricao: descricaoItem,
+      justificativa
+      }))
+    );
+  }
+  return {
+    grupo: grupos.length ? grupos.join(' + ') : '-',
+    grupos: grupos.length ? grupos : ['-'],
+    descricao,
+    justificativa,
+    vozes
+  };
+}
+
+function pontuarDescricaoGrupoJustificada(grupo, descricao) {
+  const grupoNorm = normalizarTextoFiltroModal(grupo);
+  const descNorm = normalizarTextoFiltroModal(descricao);
+  const regras = [
+    { grupo: 'NEC', palavras: ['CODIGO', 'CODIGO X', 'CODIGO-X', 'NEC'] },
+    { grupo: 'ATRASO / DIFICULTADOR', palavras: ['INSPECAO', 'SERVICO', 'MANOBRA', 'COMPLEXO', 'SEM DEMANDA', 'VISITA PRE REPROVA', 'PAROU MAIS CEDO', 'FALHA DE SISTEMA', 'LOTE DE SERVICO', 'DIFICULDADE', 'ELEVADA QUANTIDADE', 'AGUARDANDO', 'ATRASO', 'CENTRAL', 'IMPEDIMENTO', 'INTERFERENCIA'] },
+    { grupo: 'DESLOCAMENTO', palavras: ['DESLOCAMENTO', 'RURAL', 'INTERMUNICIPAL', 'FORA DO PREVISTO'] },
+    { grupo: 'MATERIAL', palavras: ['MATERIAL', 'ALMOXARIFADO', 'EQUIPAMENTO', 'DANIFICADO'] },
+    { grupo: 'VEICULO', palavras: ['VEICULO', 'MANUTENCAO', 'ABASTEC', 'CORRETIVA'] },
+    { grupo: 'PESSOAL', palavras: ['PESSOAL', 'FUNCIONARIO', 'MEDICO', 'SAIDA MAIS CEDO'] },
+    { grupo: 'PERFORMANCE', palavras: ['PERFORMANCE', 'DESPACHO', 'PROGRAMACAO', 'TRIAGEM', 'INEFICIENCIA', 'TEMPO DE PLATAFORMA', 'APOIO FORA DO PROCESSO', 'APOIO COM COMPLEMENTO'] },
+    { grupo: 'EVENTOS', palavras: ['EVENTO', 'REUNIAO', 'ASO', 'TREINATIVA'] }
+  ];
+  const regra = regras.find((item) => grupoNorm === normalizarTextoFiltroModal(item.grupo));
+  if (!regra) return 0;
+  return regra.palavras.reduce((total, palavra) => (
+    descNorm.includes(normalizarTextoFiltroModal(palavra)) ? total + 1 : total
+  ), 0);
+}
+
+function obterVozesJustificadasFiltradas(row = {}, contexto = {}) {
+  const vozesLinha = Array.isArray(row.vozes) ? row.vozes : [];
+  const grupoSelecionado = normalizarTextoFiltroModal(contexto.grupoAtivo || '');
+  const descricaoSelecionada = normalizarTextoFiltroModal(contexto.descricaoAtiva || '');
+  return vozesLinha.filter((voz) => {
+    if (grupoSelecionado && normalizarTextoFiltroModal(voz.grupo || '') !== grupoSelecionado) return false;
+    if (descricaoSelecionada && normalizarTextoFiltroModal(voz.descricao || '') !== descricaoSelecionada) return false;
+    return true;
+  });
+}
+
+function escolherGrupoDescricaoJustificada(grupos = [], descricao = '-') {
+  const grupoPadrao = grupos.find(Boolean) || '-';
+  const candidatos = grupos
+    .map((grupo, index) => ({
+      grupo,
+      index,
+      score: pontuarDescricaoGrupoJustificada(grupo, descricao)
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  return candidatos[0]?.grupo || grupoPadrao;
+}
+
+function parearGruposDescricoesJustificadas(grupos = [], descricoes = [], justificativa = '-') {
+  const descricoesDisponiveis = descricoes.map((descricao, index) => ({ descricao, index, usado: false }));
+  return grupos.map((grupo, indexGrupo) => {
+    let melhor = null;
+    descricoesDisponiveis.forEach((item) => {
+      if (item.usado) return;
+      const score = pontuarDescricaoGrupoJustificada(grupo, item.descricao);
+      if (!melhor || score > melhor.score || (score === melhor.score && Math.abs(item.index - indexGrupo) < Math.abs(melhor.index - indexGrupo))) {
+        melhor = { ...item, score };
+      }
+    });
+
+    if (!melhor || melhor.score <= 0) {
+      melhor = descricoesDisponiveis.find((item) => !item.usado && item.index === indexGrupo)
+        || descricoesDisponiveis.find((item) => !item.usado)
+        || descricoesDisponiveis[descricoesDisponiveis.length - 1]
+        || { descricao: '-', index: -1 };
+    }
+
+    const escolhido = descricoesDisponiveis.find((item) => item.index === melhor.index);
+    if (escolhido) escolhido.usado = true;
+
+    return {
+      grupo,
+      descricao: melhor.descricao || '-',
+      justificativa
+    };
+  });
+}
+
+function filtroSemanaAndonAtivo() {
+  return Array.isArray(headerSelectedWeeks) && headerSelectedWeeks.length > 0 && !headerSelectedDate && !headerSelectedMonth;
+}
+
+function montarLinhasAnaliseJustificadas(reportRows = [], rowsDetalhadas = []) {
+  const codigosVisiveis = new Set(rowsDetalhadas.map((row) => String(row.codigo || '').trim()).filter(Boolean));
+  const mapaEquipe = new Map();
+
+  reportRows.forEach((row) => {
+    const codigo = String(obterCodigoEquipeLinha(row) || '').trim();
+    if (!codigo || (codigosVisiveis.size && !codigosVisiveis.has(codigo))) return;
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA']));
+    const info = {
+      dataIso,
+      supervisor: String(obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR', 'SUPERVISOR_EQUIPE']) || '-').trim() || '-',
+      codigo,
+      equipe: String(obterValorPrimeiro(row, ['Nome', 'NOME_EQUIPE', 'NOME']) || codigo || '-').trim() || '-'
+    };
+    if (dataIso) mapaEquipe.set(`${codigo}__${dataIso}`, info);
+    if (!mapaEquipe.has(codigo) || (dataIso && dataIso > String(mapaEquipe.get(codigo)?.dataIso || ''))) {
+      mapaEquipe.set(codigo, info);
+    }
+  });
+
+  rowsDetalhadas.forEach((row) => {
+    const codigo = String(row.codigo || '').trim();
+    if (!codigo) return;
+    const info = {
+      dataIso: normalizarDataIso(row.dataIso),
+      supervisor: row.supervisor || '-',
+      codigo,
+      equipe: row.equipe || codigo || '-'
+    };
+    if (info.dataIso && !mapaEquipe.has(`${codigo}__${info.dataIso}`)) mapaEquipe.set(`${codigo}__${info.dataIso}`, info);
+    if (!mapaEquipe.has(codigo)) mapaEquipe.set(codigo, info);
+  });
+
+  const linhas = [];
+  obterRegistrosSdcaAndon(codigosVisiveis).forEach((registro) => {
+    const dataIso = normalizarDataIso(registro?.data || registro?.data_ref || registro?.dataRef || '');
+    Object.values(registro && registro.justificativas || {}).forEach((item) => {
+      const codigo = String(item && item.codigo || '').trim();
+      const justificativa = String(item && item.justificativa || '').trim();
+      if (!codigo || !justificativa || (codigosVisiveis.size && !codigosVisiveis.has(codigo))) return;
+      const equipeInfo = mapaEquipe.get(`${codigo}__${dataIso}`) || mapaEquipe.get(codigo) || {};
+      const partes = separarGrupoDescricaoJustificativa(justificativa);
+      linhas.push({
+        dataIso,
+        supervisor: equipeInfo.supervisor || '-',
+        codigo,
+        equipe: equipeInfo.equipe || codigo,
+        grupo: partes.grupo,
+        grupos: partes.grupos,
+        descricao: partes.descricao,
+        justificativa: partes.justificativa,
+        vozes: partes.vozes
+      });
+    });
+  });
+
+  const recorrencias = new Map();
+  linhas.forEach((row) => {
+    const chave = [
+      normalizarTextoFiltroModal(row.codigo),
+      normalizarTextoFiltroModal(row.grupo),
+      normalizarTextoFiltroModal(row.descricao),
+      normalizarTextoFiltroModal(row.justificativa)
+    ].join('|');
+    recorrencias.set(chave, (recorrencias.get(chave) || 0) + 1);
+  });
+
+  return linhas
+    .map((row) => {
+      const chave = [
+        normalizarTextoFiltroModal(row.codigo),
+        normalizarTextoFiltroModal(row.grupo),
+        normalizarTextoFiltroModal(row.descricao),
+        normalizarTextoFiltroModal(row.justificativa)
+      ].join('|');
+      return { ...row, recorrenciaSemana: recorrencias.get(chave) || 1 };
+    })
+    .sort((a, b) => {
+      if (a.dataIso !== b.dataIso) return String(a.dataIso || '').localeCompare(String(b.dataIso || ''));
+      const diffSupervisor = String(a.supervisor || '').localeCompare(String(b.supervisor || ''), 'pt-BR', { sensitivity: 'base' });
+      if (diffSupervisor !== 0) return diffSupervisor;
+      return String(a.equipe || '').localeCompare(String(b.equipe || ''), 'pt-BR', { sensitivity: 'base' });
+    });
+}
+
+function obterValoresCampoJustificadas(row = {}, campo = 'grupo', contexto = {}) {
+  const vozesFiltradas = obterVozesJustificadasFiltradas(row, contexto);
+  if (campo === 'grupo') {
+    if (contexto.descricaoAtiva && vozesFiltradas.length) {
+      return [...new Set(vozesFiltradas.map((voz) => String(voz.grupo || '-').trim() || '-'))];
+    }
+    const grupos = Array.isArray(row.grupos) && row.grupos.length ? row.grupos : [row.grupo || '-'];
+    return grupos.map((grupo) => String(grupo || '-').trim() || '-');
+  }
+  if (campo === 'descricao') {
+    const vozesLinha = Array.isArray(row.vozes) ? row.vozes : [];
+    if (contexto.grupoAtivo) {
+      const descricoesVozes = vozesFiltradas
+        .map((voz) => String(voz.descricao || '-').trim() || '-')
+        .filter(Boolean);
+      if (descricoesVozes.length) return descricoesVozes;
+
+      const gruposLinha = Array.isArray(row.grupos) && row.grupos.length ? row.grupos : [row.grupo || '-'];
+      const gruposNormalizados = gruposLinha.map((grupo) => normalizarTextoFiltroModal(grupo));
+      if (gruposNormalizados.length !== 1 || gruposNormalizados[0] !== normalizarTextoFiltroModal(contexto.grupoAtivo)) return [];
+    }
+    if (contexto.descricaoAtiva) {
+      const descricoesVozes = vozesFiltradas
+        .map((voz) => String(voz.descricao || '-').trim() || '-')
+        .filter(Boolean);
+      return descricoesVozes.length ? descricoesVozes : [];
+    }
+    const descricoes = String(row.descricao || '-')
+      .split(/\s*(?:\+|;|\|)\s*/g)
+      .map((descricao) => descricao.trim())
+      .map((descricao) => descricao.replace(/^[^-]+?\s+-\s+/, '').trim())
+      .filter(Boolean);
+    return descricoes.length ? descricoes : ['-'];
+  }
+  return [String(row[campo] || '-').trim() || '-'];
+}
+
+function formatarListaUnicaJustificada(valores = []) {
+  const lista = [...new Set(valores.map((valor) => String(valor || '').trim()).filter(Boolean))];
+  return lista.length ? lista.join(' + ') : '-';
+}
+
+function obterResumoCampoJustificadas(rows = [], campo = 'grupo', contexto = {}) {
+  const mapa = new Map();
+  rows.forEach((row) => {
+    obterValoresCampoJustificadas(row, campo, contexto).forEach((valor) => {
+      mapa.set(valor, (mapa.get(valor) || 0) + 1);
+    });
+  });
+  const totalOcorrencias = Array.from(mapa.values()).reduce((total, valor) => total + valor, 0);
+  const resumo = Array.from(mapa.entries())
+    .map(([valor, total]) => ({ valor, total }))
+    .sort((a, b) => b.total - a.total || a.valor.localeCompare(b.valor, 'pt-BR', { sensitivity: 'base' }));
+  return [{ valor: 'Total', total: totalOcorrencias, totalBar: true }, ...resumo];
+}
+
+function linhaJustificadaPassaBusca(row = {}, busca = '') {
+  const termo = normalizarTextoFiltroModal(busca);
+  if (!termo) return true;
+  return [
+    row.dataIso,
+    row.supervisor,
+    row.codigo,
+    row.equipe,
+    row.grupo,
+    row.descricao,
+    row.justificativa,
+    ...(Array.isArray(row.vozes) ? row.vozes.flatMap((voz) => [voz.grupo, voz.descricao, voz.justificativa]) : [])
+  ].some((valor) => normalizarTextoFiltroModal(valor).includes(termo));
+}
+
+function filtrarRowsAnaliseJustificadas(rows = [], { grupoAtivo = '', descricaoAtiva = '', busca = '' } = {}) {
+  return rows.filter((row) => {
+    if (grupoAtivo && !obterValoresCampoJustificadas(row, 'grupo', { descricaoAtiva }).includes(grupoAtivo)) return false;
+    if (descricaoAtiva && !obterValoresCampoJustificadas(row, 'descricao', { grupoAtivo }).includes(descricaoAtiva)) return false;
+    if (!linhaJustificadaPassaBusca(row, busca)) return false;
+    return true;
+  });
+}
+
+function obterValorPredominanteJustificadas(rows = [], campo = '', contexto = {}) {
+  return obterResumoCampoJustificadas(rows, campo, contexto).find((item) => !item.totalBar) || { valor: '-', total: 0 };
+}
+
+function removerAnaliseJustificadasModal() {
+  equipesModal?.querySelector('.andon-justificadas-analytics')?.remove();
+  equipesModal?.classList.remove('andon-modal-justificadas-analytics');
+}
+
+function formatarRotuloGraficoJustificadas(valor = '') {
+  const texto = String(valor || '-').trim();
+  if (!texto || texto === '-') return '-';
+  if (normalizarTextoFiltroModal(texto) === 'TOTAL') return 'Total';
+
+  const palavrasMinimas = new Set(['a', 'as', 'o', 'os', 'de', 'da', 'das', 'do', 'dos', 'e', 'em', 'por', 'com', 'sem', 'ao', 'aos']);
+  const siglas = new Set(['BH', 'COD', 'NEC', 'TOP20']);
+  return texto
+    .toLocaleLowerCase('pt-BR')
+    .split(/(\s+|\/|-)/)
+    .map((parte, index) => {
+      const limpa = parte.trim();
+      const normalizada = normalizarTextoFiltroModal(limpa);
+      if (!limpa || /^\s+$/.test(parte) || parte === '/' || parte === '-') return parte;
+      if (siglas.has(normalizada)) return normalizada;
+      if (index > 0 && palavrasMinimas.has(limpa)) return limpa;
+      return limpa.charAt(0).toLocaleUpperCase('pt-BR') + limpa.slice(1);
+    })
+    .join('');
+}
+
+function renderizarBarrasJustificadas({ rows = [], campo = 'grupo', titulo = '', ativo = '', contexto = {} } = {}) {
+  const resumo = obterResumoCampoJustificadas(rows, campo, contexto);
+  const max = Math.max(...resumo.map((item) => item.total), 1);
+  return `
+    <section class="andon-justificadas-chart-card">
+      <h4>${escaparHtmlModal(titulo)}</h4>
+      <div class="andon-justificadas-chart" aria-label="${escaparHtmlModal(titulo)}">
+        ${resumo.map((item) => {
+          const altura = Math.max(8, (item.total / max) * 100);
+          const selecionado = !item.totalBar && ativo && item.valor === ativo;
+          const rotulo = formatarRotuloGraficoJustificadas(item.valor);
+          return `
+            <button type="button" class="andon-justificadas-bar campo-${escaparHtmlModal(campo)} ${selecionado ? 'active' : ''} ${item.totalBar ? 'total' : ''}" data-campo="${escaparHtmlModal(campo)}" data-valor="${escaparHtmlModal(item.valor)}" data-total="${item.totalBar ? '1' : '0'}" title="${escaparHtmlModal(rotulo)}">
+              <strong>${formatInt(item.total)}</strong>
+              <span class="andon-justificadas-bar-track"><span style="height:${altura}%"></span></span>
+              <span class="andon-justificadas-bar-label">${escaparHtmlModal(rotulo)}</span>
+            </button>
+          `;
+        }).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function formatarDataInputModal(date) {
+  if (!date) return '';
+  const data = date instanceof Date ? date : new Date(`${date}T00:00:00`);
+  if (Number.isNaN(data.getTime())) return '';
+  const ano = data.getFullYear();
+  const mes = String(data.getMonth() + 1).padStart(2, '0');
+  const dia = String(data.getDate()).padStart(2, '0');
+  return `${ano}-${mes}-${dia}`;
+}
+
+function formatarSemanaInputModal(week = null) {
+  if (!week || !week.start) return '';
+  const ano = week.start.getFullYear();
+  return `${ano}-W${String(week.weekNum || getWeekOfYear(week.start)).padStart(2, '0')}`;
+}
+
+function obterDataPorSemanaInputModal(value) {
+  const match = String(value || '').match(/^(\d{4})-W(\d{2})$/);
+  if (!match) return null;
+  const ano = Number(match[1]);
+  const semana = Number(match[2]);
+  if (!Number.isFinite(ano) || !Number.isFinite(semana)) return null;
+  const janeiro4 = new Date(ano, 0, 4);
+  const inicioIso = new Date(janeiro4);
+  inicioIso.setDate(janeiro4.getDate() - ((janeiro4.getDay() + 6) % 7));
+  const referencia = new Date(inicioIso);
+  referencia.setDate(inicioIso.getDate() + ((semana - 1) * 7) + 3);
+  return referencia;
+}
+
+function renderizarFiltrosConsultaJustificadas() {
+  const dataValor = headerSelectedDate ? formatarDataInputModal(headerSelectedDate) : '';
+  const semanaValor = !headerSelectedDate && headerSelectedWeeks.length === 1 ? formatarSemanaInputModal(headerSelectedWeeks[0]) : '';
+  const mesValor = headerSelectedMonth
+    ? `${headerSelectedMonth.year}-${String(headerSelectedMonth.month + 1).padStart(2, '0')}`
+    : '';
+  const uoOptions = ['', ...andonAvailableUos].map((uo) => {
+    const selecionado = String(headerSelectedUo || '').replace(/[^\d]/g, '') === String(uo || '');
+    return `<option value="${escaparHtmlModal(uo)}" ${selecionado ? 'selected' : ''}>${uo ? `U.O. ${escaparHtmlModal(uo)}` : 'Todas as U.O.'}</option>`;
+  }).join('');
+  const supervisorOptions = ['', ...obterSupervisoresHeaderDisponiveis()].map((supervisor) => {
+    const selecionado = normalizarTextoFiltroModal(headerSelectedSupervisor || '') === normalizarTextoFiltroModal(supervisor || '');
+    return `<option value="${escaparHtmlModal(supervisor)}" ${selecionado ? 'selected' : ''}>${supervisor || 'Todos'}</option>`;
+  }).join('');
+
+  return `
+    <div class="andon-justificadas-filterbar">
+      <label>
+        <span>U.O.</span>
+        <select data-just-filter="uo">${uoOptions}</select>
+      </label>
+      <label>
+        <span>Data</span>
+        <input type="date" data-just-filter="data" value="${escaparHtmlModal(dataValor)}">
+      </label>
+      <label>
+        <span>Semana</span>
+        <input type="week" data-just-filter="semana" value="${escaparHtmlModal(semanaValor)}">
+      </label>
+      <label>
+        <span>Mes</span>
+        <input type="month" data-just-filter="mes" value="${escaparHtmlModal(mesValor)}">
+      </label>
+      <label>
+        <span>Supervisor</span>
+        <select data-just-filter="supervisor">${supervisorOptions}</select>
+      </label>
+      <label>
+        <span>Busca</span>
+        <input type="search" data-just-filter="busca" value="${escaparHtmlModal(modalJustificadasAnaliseEstado.busca || '')}" placeholder="Equipe, supervisor, motivo...">
+      </label>
+      <button type="button" class="andon-justificadas-filter-apply">Consultar</button>
+      <button type="button" class="andon-justificadas-filter-clear">Limpar</button>
+      <button type="button" class="andon-justificadas-export">Resumo CSV</button>
+    </div>
+  `;
+}
+
+function obterResumoFiltrosAtivosJustificadas() {
+  const filtros = [];
+  const uo = String(headerSelectedUo || '').replace(/[^\d]/g, '');
+  filtros.push(uo ? `U.O. ${uo}` : 'Todas as U.O.');
+  filtros.push(headerSelectedSupervisor || 'Todos os supervisores');
+  if (headerSelectedDate) {
+    filtros.push(`Data ${fmtHeaderDate(headerSelectedDate)}`);
+  } else if (headerSelectedWeeks.length) {
+    filtros.push(headerDateDisplay?.value || 'Semana selecionada');
+  } else if (headerSelectedMonth) {
+    filtros.push(`Mes ${fmtHeaderMonth(headerSelectedMonth.year, headerSelectedMonth.month)}`);
+  } else {
+    filtros.push('Periodo geral');
+  }
+  return filtros;
+}
+
+function renderizarResumoFiltrosJustificadas(grupoAtivo = '', descricaoAtiva = '') {
+  const filtros = obterResumoFiltrosAtivosJustificadas();
+  if (grupoAtivo) filtros.push(`Grupo ${grupoAtivo}`);
+  if (descricaoAtiva) filtros.push(`Descricao ${descricaoAtiva}`);
+  return `
+    <div class="andon-justificadas-context">
+      <span>Filtro atual</span>
+      <strong>${filtros.map((filtro) => escaparHtmlModal(filtro)).join(' | ')}</strong>
+    </div>
+  `;
+}
+
+function obterAlertasQualidadeJustificadas(rows = []) {
+  const alertas = [];
+  const semGrupo = rows.filter((row) => !String(row.grupo || '').trim() || String(row.grupo || '').trim() === '-').length;
+  const semDescricao = rows.filter((row) => !String(row.descricao || '').trim() || String(row.descricao || '').trim() === '-').length;
+  const compostas = rows.filter((row) => Array.isArray(row.grupos) && row.grupos.length > 1).length;
+  const recorrentes = rows.filter((row) => Number(row.recorrenciaSemana || 1) >= 2).length;
+  const semVozes = rows.filter((row) => {
+    const grupos = Array.isArray(row.grupos) ? row.grupos.filter(Boolean) : [];
+    return grupos.length > 1 && (!Array.isArray(row.vozes) || !row.vozes.length);
+  }).length;
+
+  if (semGrupo) alertas.push({ label: 'Sem grupo', total: semGrupo });
+  if (semDescricao) alertas.push({ label: 'Sem descricao', total: semDescricao });
+  if (recorrentes) alertas.push({ label: 'Recorrentes na semana', total: recorrentes });
+  if (compostas) alertas.push({ label: 'Justificativas compostas', total: compostas });
+  if (semVozes) alertas.push({ label: 'Compostas sem vinculo', total: semVozes });
+  return alertas;
+}
+
+function renderizarAlertasQualidadeJustificadas(rows = []) {
+  const alertas = obterAlertasQualidadeJustificadas(rows);
+  if (!alertas.length) {
+    return `
+      <div class="andon-justificadas-quality is-ok">
+        <span>Qualidade dos dados</span>
+        <strong>Sem inconsistencias aparentes</strong>
+      </div>
+    `;
+  }
+  return `
+    <div class="andon-justificadas-quality">
+      <span>Atencao nos dados</span>
+      <div>
+        ${alertas.map((alerta) => `
+          <strong>${escaparHtmlModal(alerta.label)}: ${formatInt(alerta.total)}</strong>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function obterDiagnosticoJustificadas(rows = [], contexto = {}) {
+  if (!rows.length) return 'Nenhuma justificativa encontrada para o filtro atual.';
+  const topSupervisor = contarPorCampoJustificadas(rows, 'supervisor')[0] || { valor: '-', total: 0 };
+  const topGrupo = obterValorPredominanteJustificadas(rows, 'grupo', contexto);
+  const topDescricao = obterValorPredominanteJustificadas(rows, 'descricao', contexto);
+  const recorrentes = rows.filter((row) => Number(row.recorrenciaSemana || 1) >= 2).length;
+  return `${topSupervisor.valor} concentra ${formatInt(topSupervisor.total)} justificativas | maior causa: ${topGrupo.valor} / ${topDescricao.valor} | recorrentes: ${formatInt(recorrentes)}`;
+}
+
+function renderizarDiagnosticoJustificadas(rows = [], contexto = {}) {
+  return `
+    <div class="andon-justificadas-diagnostic">
+      <span>Diagnostico automatico</span>
+      <strong>${escaparHtmlModal(obterDiagnosticoJustificadas(rows, contexto))}</strong>
+    </div>
+  `;
+}
+
+function contarPorCampoJustificadas(rows = [], campo = '') {
+  const mapa = new Map();
+  rows.forEach((row) => {
+    const valor = String(row[campo] || '-').trim() || '-';
+    mapa.set(valor, (mapa.get(valor) || 0) + 1);
+  });
+  return Array.from(mapa.entries())
+    .map(([valor, total]) => ({ valor, total }))
+    .sort((a, b) => b.total - a.total || a.valor.localeCompare(b.valor, 'pt-BR', { sensitivity: 'base' }));
+}
+
+function renderizarRankingOperacionalJustificadas(rows = [], contexto = {}) {
+  const topSupervisor = contarPorCampoJustificadas(rows, 'supervisor')[0] || { valor: '-', total: 0 };
+  const topEquipe = contarPorCampoJustificadas(rows, 'equipe')[0] || { valor: '-', total: 0 };
+  const topGrupo = obterValorPredominanteJustificadas(rows, 'grupo', contexto);
+  const topDescricao = obterValorPredominanteJustificadas(rows, 'descricao', contexto);
+  return `
+    <div class="andon-justificadas-ranking">
+      <div><span>Supervisor critico</span><strong>${escaparHtmlModal(topSupervisor.valor)} (${formatInt(topSupervisor.total)})</strong></div>
+      <div><span>Equipe recorrente</span><strong>${escaparHtmlModal(topEquipe.valor)} (${formatInt(topEquipe.total)})</strong></div>
+      <div><span>Grupo dominante</span><strong>${escaparHtmlModal(topGrupo.valor)} (${formatInt(topGrupo.total)})</strong></div>
+      <div><span>Descricao dominante</span><strong>${escaparHtmlModal(topDescricao.valor)} (${formatInt(topDescricao.total)})</strong></div>
+    </div>
+  `;
+}
+
+function escaparCsvAndon(valor) {
+  const texto = String(valor ?? '');
+  return /[;"\n\r]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
+}
+
+function montarLinhasCsvResumoJustificadas() {
+  const grupoAtivo = modalJustificadasAnaliseEstado.grupoAtivo || '';
+  const descricaoAtiva = modalJustificadasAnaliseEstado.descricaoAtiva || '';
+  const busca = modalJustificadasAnaliseEstado.busca || '';
+  const rows = filtrarRowsAnaliseJustificadas(modalJustificadasAnaliseEstado.rows || [], { grupoAtivo, descricaoAtiva, busca });
+  const filtros = obterResumoFiltrosAtivosJustificadas();
+  if (grupoAtivo) filtros.push(`Grupo ${grupoAtivo}`);
+  if (descricaoAtiva) filtros.push(`Descricao ${descricaoAtiva}`);
+  if (busca) filtros.push(`Busca ${busca}`);
+
+  const linhas = [
+    ['Secao', 'Item', 'Valor'],
+    ['Filtros', 'Filtro atual', filtros.join(' | ')],
+    ['Resumo', 'Total de justificativas', rows.length],
+    ['Resumo', 'Supervisor critico', `${contarPorCampoJustificadas(rows, 'supervisor')[0]?.valor || '-'} (${formatInt(contarPorCampoJustificadas(rows, 'supervisor')[0]?.total || 0)})`],
+    ['Resumo', 'Equipe recorrente', `${contarPorCampoJustificadas(rows, 'equipe')[0]?.valor || '-'} (${formatInt(contarPorCampoJustificadas(rows, 'equipe')[0]?.total || 0)})`]
+  ];
+
+  obterAlertasQualidadeJustificadas(rows).forEach((alerta) => {
+    linhas.push(['Alertas', alerta.label, alerta.total]);
+  });
+
+  obterResumoCampoJustificadas(rows, 'grupo').filter((item) => !item.totalBar).slice(0, 10).forEach((item, index) => {
+    linhas.push(['Top grupos', `${index + 1}. ${item.valor}`, item.total]);
+  });
+
+  obterResumoCampoJustificadas(rows, 'descricao', { grupoAtivo }).filter((item) => !item.totalBar).slice(0, 10).forEach((item, index) => {
+    linhas.push(['Top descricoes', `${index + 1}. ${item.valor}`, item.total]);
+  });
+
+  return linhas;
+}
+
+function nomeArquivoResumoJustificadas() {
+  const agora = new Date();
+  const stamp = [
+    agora.getFullYear(),
+    String(agora.getMonth() + 1).padStart(2, '0'),
+    String(agora.getDate()).padStart(2, '0'),
+    String(agora.getHours()).padStart(2, '0'),
+    String(agora.getMinutes()).padStart(2, '0')
+  ].join('');
+  return `resumo_justificativas_andon_${stamp}.csv`;
+}
+
+function exportarResumoExecutivoJustificadas() {
+  const linhas = montarLinhasCsvResumoJustificadas();
+  const csv = linhas.map((linha) => linha.map(escaparCsvAndon).join(';')).join('\r\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = nomeArquivoResumoJustificadas();
+  document.body.appendChild(link);
+  link.click();
+  URL.revokeObjectURL(link.href);
+  link.remove();
+}
+
+function sincronizarHeaderComFiltrosConsultaModal() {
+  const uo = String(headerSelectedUo || '').replace(/[^\d]/g, '');
+  if (headerUoDisplay) headerUoDisplay.value = uo ? `U.O. ${uo}` : 'Todas as U.O.';
+  if (headerSupervisorDisplay) headerSupervisorDisplay.value = headerSelectedSupervisor || 'Todos';
+  if (headerDateDisplay) {
+    if (headerSelectedDate) {
+      headerDateDisplay.value = fmtHeaderDate(headerSelectedDate);
+    } else if (headerSelectedWeeks.length) {
+      updateWeekDisplay();
+    } else {
+      headerDateDisplay.value = '';
+    }
+  }
+  if (headerMonthDisplay) {
+    headerMonthDisplay.value = headerSelectedMonth ? fmtHeaderMonth(headerSelectedMonth.year, headerSelectedMonth.month) : '';
+  }
+}
+
+function atualizarAnaliseJustificadasNoModal() {
+  executarAtualizacaoDashboardAndon();
+  abrirModalEquipesJustificadasDetalhado();
+  renderizarAnaliseJustificadasModal('', '');
+}
+
+function aplicarFiltrosConsultaJustificadas(painel) {
+  const obterCampo = (nome) => painel?.querySelector(`[data-just-filter="${nome}"]`);
+  const uo = String(obterCampo('uo')?.value || '').replace(/[^\d]/g, '');
+  const supervisor = String(obterCampo('supervisor')?.value || '').trim();
+  const data = String(obterCampo('data')?.value || '').trim();
+  const semana = String(obterCampo('semana')?.value || '').trim();
+  const mes = String(obterCampo('mes')?.value || '').trim();
+  const busca = String(obterCampo('busca')?.value || '').trim();
+  modalJustificadasAnaliseEstado.busca = busca;
+
+  headerSelectedUo = uo ? `U.O. ${uo}` : '';
+  headerSelectedSupervisor = supervisor;
+  headerSelectedDate = null;
+  headerSelectedWeeks = [];
+  headerSelectedMonth = null;
+
+  if (data) {
+    headerSelectedDate = new Date(`${data}T00:00:00`);
+    headerDatePickerMonth = new Date(headerSelectedDate.getFullYear(), headerSelectedDate.getMonth(), 1);
+    headerMonthPickerYear = headerSelectedDate.getFullYear();
+  } else if (semana) {
+    const referencia = obterDataPorSemanaInputModal(semana);
+    if (referencia) {
+      const range = getWeekRange(referencia);
+      headerSelectedWeeks = [{ weekNum: getWeekOfYear(referencia), start: range.start, end: range.end }];
+      headerDatePickerMonth = new Date(range.start.getFullYear(), range.start.getMonth(), 1);
+      headerMonthPickerYear = range.start.getFullYear();
+    }
+  } else if (mes) {
+    const [ano, mesNumero] = mes.split('-').map(Number);
+    if (Number.isFinite(ano) && Number.isFinite(mesNumero)) {
+      headerSelectedMonth = { year: ano, month: mesNumero - 1 };
+      headerDatePickerMonth = new Date(ano, mesNumero - 1, 1);
+      headerMonthPickerYear = ano;
+    }
+  }
+
+  limparCacheAndon();
+  garantirSupervisorSelecionadoDisponivel();
+  sincronizarHeaderComFiltrosConsultaModal();
+  renderHeaderUoOptions();
+  renderHeaderSupervisorOptions();
+  atualizarAnaliseJustificadasNoModal();
+}
+
+function limparFiltrosConsultaJustificadas() {
+  headerSelectedUo = '';
+  headerSelectedSupervisor = '';
+  headerSelectedDate = null;
+  headerSelectedWeeks = [];
+  headerSelectedMonth = null;
+  modalJustificadasAnaliseEstado.busca = '';
+  limparCacheAndon();
+  sincronizarHeaderComFiltrosConsultaModal();
+  renderHeaderUoOptions();
+  renderHeaderSupervisorOptions();
+  atualizarAnaliseJustificadasNoModal();
+}
+
+function aplicarBuscaAnaliseJustificadas(painel) {
+  modalJustificadasAnaliseEstado.busca = String(painel?.querySelector('[data-just-filter="busca"]')?.value || '').trim();
+  renderizarAnaliseJustificadasModal(
+    modalJustificadasAnaliseEstado.grupoAtivo || '',
+    modalJustificadasAnaliseEstado.descricaoAtiva || ''
+  );
+}
+
+function renderizarGraficoJustificadas(rows = [], grupoAtivo = '', descricaoAtiva = '') {
+  renderizarGraficoJustificadasDuplo(rows, grupoAtivo, descricaoAtiva);
+  return;
+  removerAnaliseJustificadasModal();
+  const tabelaWrap = equipesModal?.querySelector('.andon-modal-table-wrap');
+  if (!tabelaWrap) return;
+
+  const total = rows.length;
+  const resumoGrupo = obterResumoCampoJustificadas(rows, 'grupo').filter((item) => !item.totalBar);
+  const resumoDescricao = obterResumoCampoJustificadas(rows, 'descricao').filter((item) => !item.totalBar);
+  const topGrupo = resumoGrupo[0]?.valor || '-';
+  const topDescricao = resumoDescricao[0]?.valor || '-';
+  const topTotal = resumoDescricao[0]?.total || 0;
+  const temFiltro = Boolean(grupoAtivo || descricaoAtiva);
+
+  const painel = document.createElement('div');
+  painel.className = 'andon-justificadas-analytics';
+  painel.innerHTML = `
+    ${renderizarFiltrosConsultaJustificadas()}
+    <div class="andon-justificadas-summary">
+      <div>
+        <span>Total de justificativas</span>
+        <strong>${formatInt(total)}</strong>
+      </div>
+      <div>
+        <span>Voz predominante</span>
+        <strong>${escaparHtmlModal(topGrupo)}</strong>
+      </div>
+      <div>
+        <span>Ocorrências da voz</span>
+        <strong>${formatInt(topTotal)}</strong>
+      </div>
+      <button type="button" class="andon-justificadas-clear ${grupoAtivo ? '' : 'hidden'}">Limpar seleção</button>
+    </div>
+    <div class="andon-justificadas-chart" aria-label="Gráfico de vozes de justificativa">
+      ${resumo.map((item) => {
+        const largura = Math.max(6, (item.total / max) * 100);
+        const ativo = grupoAtivo && item.grupo === grupoAtivo;
+        return `
+          <button type="button" class="andon-justificadas-bar ${ativo ? 'active' : ''}" data-grupo="${escaparHtmlModal(item.grupo)}">
+            <span class="andon-justificadas-bar-label">${escaparHtmlModal(item.grupo)}</span>
+            <span class="andon-justificadas-bar-track"><span style="width:${largura}%"></span></span>
+            <strong>${formatInt(item.total)}</strong>
+          </button>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  painel.querySelectorAll('.andon-justificadas-bar').forEach((botao) => {
+    botao.addEventListener('click', () => {
+      const grupo = botao.dataset.grupo || '';
+      renderizarAnaliseJustificadasModal(grupo === modalJustificadasAnaliseEstado.grupoAtivo ? '' : grupo);
+    });
+  });
+  painel.querySelector('.andon-justificadas-clear')?.addEventListener('click', () => renderizarAnaliseJustificadasModal(''));
+  tabelaWrap.insertAdjacentElement('beforebegin', painel);
+}
+
+function renderizarGraficoJustificadasDuplo(rows = [], grupoAtivo = '', descricaoAtiva = '') {
+  removerAnaliseJustificadasModal();
+  const tabelaWrap = equipesModal?.querySelector('.andon-modal-table-wrap');
+  if (!tabelaWrap) return;
+
+  const busca = modalJustificadasAnaliseEstado.busca || '';
+  const rowsBusca = rows.filter((row) => linhaJustificadaPassaBusca(row, busca));
+  const rowsFiltradas = filtrarRowsAnaliseJustificadas(rows, { grupoAtivo, descricaoAtiva, busca });
+  const rowsGraficoGrupo = descricaoAtiva
+    ? rowsBusca.filter((row) => obterValoresCampoJustificadas(row, 'descricao', { grupoAtivo }).includes(descricaoAtiva))
+    : rowsBusca;
+  const rowsGraficoDescricao = grupoAtivo
+    ? rowsBusca.filter((row) => obterValoresCampoJustificadas(row, 'grupo').includes(grupoAtivo))
+    : rowsBusca;
+  const total = rowsFiltradas.length;
+  const resumoGrupo = obterResumoCampoJustificadas(rowsFiltradas, 'grupo').filter((item) => !item.totalBar);
+  const resumoDescricao = obterResumoCampoJustificadas(rowsFiltradas, 'descricao', { grupoAtivo }).filter((item) => !item.totalBar);
+  const topGrupo = resumoGrupo[0]?.valor || '-';
+  const topDescricao = resumoDescricao[0]?.valor || '-';
+  const topTotal = resumoDescricao[0]?.total || 0;
+  const temFiltro = Boolean(grupoAtivo || descricaoAtiva);
+
+  const painel = document.createElement('div');
+  painel.className = 'andon-justificadas-analytics';
+  painel.innerHTML = `
+    ${renderizarFiltrosConsultaJustificadas()}
+    ${renderizarResumoFiltrosJustificadas(grupoAtivo, descricaoAtiva)}
+    <div class="andon-justificadas-summary">
+      <div>
+        <span>Total de justificativas</span>
+        <strong>${formatInt(total)}</strong>
+      </div>
+      <div>
+        <span>Grupo predominante</span>
+        <strong>${escaparHtmlModal(topGrupo)}</strong>
+      </div>
+      <div>
+        <span>Descricao predominante</span>
+        <strong>${escaparHtmlModal(topDescricao)} (${formatInt(topTotal)})</strong>
+      </div>
+      <button type="button" class="andon-justificadas-clear ${temFiltro ? '' : 'hidden'}">Limpar selecao</button>
+    </div>
+    ${renderizarAlertasQualidadeJustificadas(rowsFiltradas)}
+    ${renderizarDiagnosticoJustificadas(rowsFiltradas, { grupoAtivo, descricaoAtiva })}
+    ${renderizarRankingOperacionalJustificadas(rowsFiltradas, { grupoAtivo, descricaoAtiva })}
+    ${renderizarBarrasJustificadas({ rows: rowsGraficoGrupo, campo: 'grupo', titulo: 'Grafico por Grupo', ativo: grupoAtivo })}
+    ${renderizarBarrasJustificadas({ rows: rowsGraficoDescricao, campo: 'descricao', titulo: 'Grafico por Descricao', ativo: descricaoAtiva, contexto: { grupoAtivo } })}
+  `;
+
+  painel.querySelectorAll('.andon-justificadas-bar').forEach((botao) => {
+    botao.addEventListener('click', () => {
+      const campo = botao.dataset.campo || '';
+      const valor = botao.dataset.valor || '';
+      const total = botao.dataset.total === '1';
+      const grupo = campo === 'grupo'
+        ? (total || valor === modalJustificadasAnaliseEstado.grupoAtivo ? '' : valor)
+        : modalJustificadasAnaliseEstado.grupoAtivo;
+      const descricao = campo === 'descricao'
+        ? (total || valor === modalJustificadasAnaliseEstado.descricaoAtiva ? '' : valor)
+        : modalJustificadasAnaliseEstado.descricaoAtiva;
+      renderizarAnaliseJustificadasModal(grupo, descricao);
+    });
+  });
+  painel.querySelector('.andon-justificadas-clear')?.addEventListener('click', () => renderizarAnaliseJustificadasModal('', ''));
+  painel.querySelector('.andon-justificadas-filter-apply')?.addEventListener('click', () => aplicarFiltrosConsultaJustificadas(painel));
+  painel.querySelector('.andon-justificadas-filter-clear')?.addEventListener('click', limparFiltrosConsultaJustificadas);
+  painel.querySelector('.andon-justificadas-export')?.addEventListener('click', exportarResumoExecutivoJustificadas);
+  painel.querySelectorAll('.andon-justificadas-filterbar input, .andon-justificadas-filterbar select').forEach((campo) => {
+    campo.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') aplicarFiltrosConsultaJustificadas(painel);
+    });
+  });
+  tabelaWrap.insertAdjacentElement('beforebegin', painel);
+}
+
+function renderizarAnaliseJustificadasModal(grupoAtivo = '', descricaoAtiva = '') {
+  const rowsBase = modalJustificadasAnaliseEstado.rows || [];
+  modalJustificadasAnaliseEstado.grupoAtivo = grupoAtivo || '';
+  modalJustificadasAnaliseEstado.descricaoAtiva = descricaoAtiva || '';
+  const rows = filtrarRowsAnaliseJustificadas(rowsBase, {
+    grupoAtivo,
+    descricaoAtiva,
+    busca: modalJustificadasAnaliseEstado.busca || ''
+  });
+  const mostrarRecorrencia = filtroSemanaAndonAtivo();
 
   renderCabecalhoModalGenerico([
     { label: 'Data' },
     { label: 'Supervisor' },
+    { label: 'Equipe' },
+    { label: 'Grupo' },
+    { label: 'Descrição' },
+    { label: 'Justificativa' },
+    { label: 'Hist.' },
+    ...(mostrarRecorrencia ? [{ label: 'Qtd. Semana' }] : [])
+  ]);
+  equipesModal?.classList.add('andon-modal-justificadas-analytics');
+  if (equipesModalTitle) equipesModalTitle.textContent = 'Analise de Justificativas';
+  if (equipesModalMeta) {
+    equipesModalMeta.textContent = `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Registros: ${formatInt(rows.length)}`;
+  }
+  configurarBotaoVoltarModalEquipes(null);
+  configurarBotaoAnaliseJustificadas(true, true);
+  renderizarGraficoJustificadasDuplo(rowsBase, grupoAtivo, descricaoAtiva);
+  modalJustificadasAnaliseEstado.historico = new Map();
+  renderizarModalBodyEmLotes(
+    rows,
+    (row, index) => {
+      const contexto = { grupoAtivo, descricaoAtiva };
+      const grupoLinha = grupoAtivo || formatarListaUnicaJustificada(obterValoresCampoJustificadas(row, 'grupo', contexto));
+      const descricaoLinha = descricaoAtiva || formatarListaUnicaJustificada(obterValoresCampoJustificadas(row, 'descricao', contexto));
+      const vozesLinha = obterVozesJustificadasFiltradas(row, contexto);
+      const justificativaLinha = vozesLinha.length
+        ? formatarListaUnicaJustificada(vozesLinha.map((voz) => voz.justificativa || row.justificativa || '-'))
+        : row.justificativa || '-';
+      const historicoId = `just-hist-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`;
+      modalJustificadasAnaliseEstado.historico.set(historicoId, row);
+      return `
+        <tr>
+          <td>${formatarDataBrAndon(row.dataIso)}</td>
+          <td>${escaparHtmlModal(row.supervisor || '-')}</td>
+          <td>${escaparHtmlModal(row.equipe || '-')}</td>
+          <td>${escaparHtmlModal(grupoLinha || '-')}</td>
+          <td>${escaparHtmlModal(descricaoLinha || '-')}</td>
+          <td>${escaparHtmlModal(justificativaLinha || '-')}</td>
+          <td><button type="button" class="andon-just-hist-btn" data-just-hist-id="${historicoId}">Ver</button></td>
+          ${mostrarRecorrencia ? `<td>${formatInt(row.recorrenciaSemana || 1)}</td>` : ''}
+        </tr>
+      `;
+    },
+    `<tr><td colspan="${mostrarRecorrencia ? 8 : 7}" class="andon-modal-empty">Nenhuma justificativa encontrada.</td></tr>`
+  );
+}
+
+function abrirHistoricoJustificadasEquipe(row = {}) {
+  const codigo = String(row.codigo || '').trim();
+  if (!codigo) return;
+  removerAnaliseJustificadasModal();
+  const historico = (modalJustificadasAnaliseEstado.rows || [])
+    .filter((item) => String(item.codigo || '').trim() === codigo)
+    .sort((a, b) => String(b.dataIso || '').localeCompare(String(a.dataIso || '')));
+
+  renderCabecalhoModalGenerico([
+    { label: 'Data' },
+    { label: 'Supervisor' },
+    { label: 'Equipe' },
+    { label: 'Grupo' },
+    { label: 'Descricao' },
+    { label: 'Justificativa' },
+    { label: 'Qtd. Semana' }
+  ]);
+
+  if (equipesModalTitle) equipesModalTitle.textContent = `Historico de justificativas - ${row.equipe || codigo}`;
+  if (equipesModalMeta) equipesModalMeta.textContent = `Codigo: ${codigo} | Registros: ${formatInt(historico.length)}`;
+  configurarBotaoAnaliseJustificadas(false, false);
+  configurarBotaoVoltarModalEquipes({
+    tipoContexto: 'justificadas-analise',
+    grupoAtivo: modalJustificadasAnaliseEstado.grupoAtivo || '',
+    descricaoAtiva: modalJustificadasAnaliseEstado.descricaoAtiva || ''
+  });
+
+  renderizarModalBodyEmLotes(
+    historico,
+    (item) => `
+      <tr>
+        <td>${formatarDataBrAndon(item.dataIso)}</td>
+        <td>${escaparHtmlModal(item.supervisor || '-')}</td>
+        <td>${escaparHtmlModal(item.equipe || '-')}</td>
+        <td>${escaparHtmlModal(item.grupo || '-')}</td>
+        <td>${escaparHtmlModal(item.descricao || '-')}</td>
+        <td>${escaparHtmlModal(item.justificativa || '-')}</td>
+        <td>${formatInt(item.recorrenciaSemana || 1)}</td>
+      </tr>
+    `,
+    '<tr><td colspan="7" class="andon-modal-empty">Nenhum historico encontrado para esta equipe.</td></tr>'
+  );
+}
+
+function abrirModalEquipesJustificadasDetalhado() {
+  if (!equipesModal || !equipesModalBody) return;
+  aplicarModalTelaCheia(true);
+  removerAnaliseJustificadasModal();
+
+  const reportRows = filtrarReportRowsAndon();
+  const controleRows = filtrarControleRowsAndon();
+  const rows = montarLinhasModalEquipesAcordadas(reportRows, controleRows, 'justificadas');
+  modalJustificadasAnaliseEstado = {
+    rows: montarLinhasAnaliseJustificadas(filtrarReportRowsComInicioJornada(reportRows), rows),
+    grupoAtivo: '',
+    descricaoAtiva: '',
+    busca: modalJustificadasAnaliseEstado.busca || '',
+    historico: new Map()
+  };
+
+  renderCabecalhoModalGenerico([
+    { label: 'Data' },
+    { label: 'Dias Acordados' },
+    { label: 'Supervisor' },
     { label: 'Cód. Eqp.' },
-    { label: 'Frota' },
     { label: 'Equipe' },
     { label: 'Meta' },
     { label: 'Prod.' },
@@ -2660,15 +5014,16 @@ function abrirModalEquipesJustificadasDetalhado() {
   if (equipesModalMeta) {
     equipesModalMeta.textContent = `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(rows.length)}`;
   }
+  configurarBotaoAnaliseJustificadas(true, false);
 
   renderizarModalBodyEmLotes(
     rows,
     (row) => `
       <tr>
-        <td>${formatarDataBrAndon(row.dataIso)}</td>
+        <td>${formatarSequenciaDatasAndon(row.datasAcordadas && row.datasAcordadas.length ? row.datasAcordadas : [row.dataIso])}</td>
+        <td>${formatInt(row.diasAcordados || 1)}</td>
         <td>${row.supervisor || '-'}</td>
         <td>${row.codigo || '-'}</td>
-        <td>${row.frota || '-'}</td>
         <td>${row.equipe || '-'}</td>
         <td>${formatNumber3(row.metaDia)}</td>
         <td>${formatNumber3(row.prod13)}</td>
@@ -2725,8 +5080,8 @@ function obterCodigosEquipesSemRefeicao(reportRows = filtrarReportRowsAndon(), l
 }
 
 function abrirModalRefeicaoSemRegistro() {
-  const reportRows = filtrarReportRowsAndon();
-  const controleRows = filtrarControleRowsAndon();
+  const reportRows = filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
+  const controleRows = obterControleRowsPorCodigos(obterCodigosReportRows(reportRows));
   const listaEquipes = montarLinhasModalEquipes(reportRows, 'todas', controleRows);
   const codigosSemRefeicao = obterCodigosEquipesSemRefeicao(reportRows, listaEquipes);
 
@@ -2745,16 +5100,18 @@ function abrirModalRefeicaoSemRegistro() {
 }
 
 function abrirModalJornadaProdutivaContexto(tipo = 'todas') {
-  const reportRows = filtrarReportRowsAndon();
-  const controleRows = filtrarControleRowsAndon();
-  const listaEquipes = montarLinhasModalEquipes(reportRows, 'todas', controleRows);
+  const reportRows = filtrarReportRowsPorDiasComInicioJornada(filtrarReportRowsAndon());
+  const controleRows = obterControleRowsPorCodigos(obterCodigosReportRows(reportRows));
+  const listaEquipes = montarLinhasModalEquipes(reportRows, 'todas', controleRows, { apenasComInicioJornada: true });
+  const totalEfetiva = listaEquipes.length;
 
   if (tipo !== 'incompleta') {
     abrirModalEquipesAndonContexto({
       rows: reportRows,
       controleRows,
       title: 'Jornada Produtiva',
-      meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(listaEquipes.length)}`
+      meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(totalEfetiva)}`,
+      apenasComInicioJornada: true
     });
     return;
   }
@@ -2778,7 +5135,8 @@ function abrirModalJornadaProdutivaContexto(tipo = 'todas') {
     rows: rowsIncompletas,
     controleRows: controleIncompletas,
     title: 'Jornada Produtiva Incompleta',
-    meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(codigosIncompletas.size)}`
+    meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${formatInt(codigosIncompletas.size)}`,
+    apenasComInicioJornada: true
   });
 }
 
@@ -2787,6 +5145,8 @@ function fecharModalEquipesAndon() {
     equipesModal.classList.add('hidden');
     aplicarModalTelaCheia(false);
     equipesModal.classList.remove('andon-modal-detalhe-datas');
+    removerAnaliseJustificadasModal();
+    configurarBotaoAnaliseJustificadas(false);
     configurarBotaoVoltarModalEquipes(null);
   }
 }
@@ -2820,17 +5180,16 @@ function obterRowsSupervisorCard(card) {
 
 function obterControleRowsPorCodigos(codigos = new Set()) {
   const permitidos = new Set(Array.from(codigos).map((codigo) => String(codigo).trim()).filter(Boolean));
-  return filtrarControleRowsAndon().filter((row) => {
-    const codigo = String(
-      obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || ''
-    ).trim();
-    return permitidos.has(codigo);
-  });
+  if (!permitidos.size) return [];
+  const mapa = obterMapaControlePorCodigoAndon();
+  return Array.from(permitidos).flatMap((codigo) => mapa.get(codigo) || []);
 }
 
 function obterControleRowsSupervisorPorCodigos(card, codigos = new Set()) {
   const permitidos = new Set(Array.from(codigos).map((codigo) => String(codigo).trim()).filter(Boolean));
-  return filtrarControleRowsAndon().filter((row) => {
+  if (!permitidos.size) return [];
+  const rowsBase = Array.from(permitidos).flatMap((codigo) => obterMapaControlePorCodigoAndon().get(codigo) || []);
+  return rowsBase.filter((row) => {
     const dataIso = obterDataControleLinha(row);
     if (!linhaPassaFiltroSupervisorView(dataIso)) return false;
 
@@ -2858,14 +5217,13 @@ function normalizarFlagServico(value) {
 }
 
 function calcularEficiencia(rows = [], controleRows = []) {
-  const codigosEquipes = new Set();
+  const codigosEquipes = obterCodigosReportRows(rows);
   const codigosComServico = new Set();
   let servicosProdutivos = 0;
   let servicosImprodutivos = 0;
 
   controleRows.forEach((row) => {
     const codigo = String(obterValorPrimeiro(row, ['COD_EQUIPE_WM', 'COD_EQUIPE', 'NUM_EQUIPE']) || '').trim();
-    if (codigo) codigosEquipes.add(codigo);
     if (codigo) codigosComServico.add(codigo);
 
     const flag = normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS']));
@@ -2873,10 +5231,11 @@ function calcularEficiencia(rows = [], controleRows = []) {
     if (flag === 'NAO') servicosImprodutivos += 1;
   });
 
-  const totalEfetiva = codigosEquipes.size;
+  const totalEfetiva = codigosComServico.size || codigosEquipes.size;
   const servicosDesignados = controleRows.length;
   const servicosExecutados = servicosProdutivos + servicosImprodutivos;
-  const semServico = Array.from(codigosEquipes).filter((codigo) => !codigosComServico.has(codigo)).length;
+  const baseSemServico = codigosEquipes.size ? codigosEquipes : codigosComServico;
+  const semServico = Array.from(baseSemServico).filter((codigo) => !codigosComServico.has(codigo)).length;
   const percImprodutivo = servicosExecutados > 0 ? (servicosImprodutivos / servicosExecutados) * 100 : 0;
   const mediaServicoPorEqp = totalEfetiva > 0 ? servicosDesignados / totalEfetiva : 0;
 
@@ -3068,7 +5427,7 @@ function abrirModalJornadaOcorrencia(tipo, options = {}) {
 
   const rows = obterRowsJornadaOcorrencia(
     tipo,
-    Array.isArray(options.reportRows) ? options.reportRows : filtrarReportRowsAndon(),
+    Array.isArray(options.reportRows) ? options.reportRows : filtrarReportRowsComInicioJornada(filtrarReportRowsAndon()),
     Array.isArray(options.folhaRows) ? options.folhaRows : filtrarFolhaPontoRowsAndon()
   );
   const tituloPadrao = tipo === 'atraso' ? 'Atraso' : 'Saída Antecipada';
@@ -3117,7 +5476,7 @@ function abrirModalAbsenteismo(options = {}) {
   if (!equipesModal || !equipesModalBody) return;
   aplicarModalTelaCheia(true);
 
-  const reportRows = Array.isArray(options.reportRows) ? options.reportRows : filtrarReportRowsAndon();
+  const reportRows = Array.isArray(options.reportRows) ? options.reportRows : filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
 
   const rows = obterRowsAbsenteismo(
     reportRows,
@@ -3231,6 +5590,9 @@ async function obterRowsControleServicoModalDireto(tipo = 'todos') {
     andonControleRows = rows;
     andonControleLoadedKey = obterChavePeriodoFiltroAndon();
     limparCacheAndon();
+    if (tipo !== 'improdutivos') {
+      atualizarCardsEficiencia();
+    }
 
     if (tipo === 'produtivos') {
       return rows.filter((row) => normalizarFlagServico(obterValorPrimeiro(row, ['PRODUTIVO', 'PRODUTIVOS'])) === 'SIM');
@@ -3497,7 +5859,10 @@ function abrirModalControleServicoDetalheDias(detalhe) {
     tipoContexto: 'controle-servico',
     tipo: detalhe.tipo || 'improdutivos',
     title: detalhe.tituloOrigem || 'Impedimento',
-    options: { agruparPorEquipe: true }
+    options: {
+      agruparPorEquipe: true,
+      modalFiltros: detalhe.filtrosOrigem || null
+    }
   });
   renderizarModalTabelaPaginada(rowsEquipe, columns, 'Nenhum registro de impedimento encontrado para esta equipe.');
   renderizarRodapeControleServicoDetalhe(rowsEquipe, detalhe.obterSupervisorControle);
@@ -3576,6 +5941,7 @@ async function abrirModalControleServicoModelo(tipo = 'todos', title = 'Servicos
     configurarBotaoVoltarModalEquipes(null);
     renderizarModalTabelaPaginada(lista, columns, 'Nenhuma equipe com impedimento encontrada.');
     renderizarRodapeControleServicoPorEquipe(lista);
+    restaurarFiltrosModalQuandoPronto(options.modalFiltros || null);
     equipesModal.classList.remove('hidden');
     inserirResumoControleServicoModal(rows);
     return;
@@ -3608,6 +5974,7 @@ async function abrirModalControleServicoModelo(tipo = 'todos', title = 'Servicos
   if (equipesModalTitle) equipesModalTitle.textContent = title;
   if (equipesModalMeta) equipesModalMeta.textContent = `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Registros: ${formatInt(rows.length)}`;
   renderizarModalTabelaPaginada(rows, columns);
+  restaurarFiltrosModalQuandoPronto(options.modalFiltros || null);
   equipesModal.classList.remove('hidden');
   inserirResumoControleServicoModal(rows);
 }
@@ -3684,7 +6051,7 @@ function abrirModalResumoControleServicoPorEquipe() {
 }
 
 function abrirModalHoraExtra() {
-  const reportRows = filtrarReportRowsAndon();
+  const reportRows = filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
   const codigos = obterCodigosReportRows(reportRows);
   const rows = filtrarFolhaPontoRowsAndon().filter((row) => {
     const codigoEquipe = String(obterValorPrimeiro(row, ['COD_EQUIPE']) || '').trim();
@@ -3735,14 +6102,14 @@ async function carregarEquipesSdcaFallback() {
 }
 
 async function abrirModalSdcaTotalEquipes() {
-  let reportRows = filtrarReportRowsAndon();
+  let reportRows = filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
   if (!reportRows.length) {
-    reportRows = andonReportRows.filter((row) => {
+    reportRows = filtrarReportRowsComInicioJornada(andonReportRows.filter((row) => {
       const uo = obterUoLinha(row);
       if (headerSelectedUo && uo !== headerSelectedUo.replace(/[^\d]/g, '')) return false;
       const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA']));
       return !dataIso || linhaPassaFiltrosPeriodo(dataIso);
-    });
+    }));
   }
   if (!reportRows.length && andonReportRows.length) {
     const datas = [...new Set(
@@ -3751,14 +6118,14 @@ async function abrirModalSdcaTotalEquipes() {
         .filter(Boolean)
     )].sort();
     const ultimaData = datas[datas.length - 1];
-    reportRows = andonReportRows.filter((row) => {
+    reportRows = filtrarReportRowsComInicioJornada(andonReportRows.filter((row) => {
       const uo = obterUoLinha(row);
       if (headerSelectedUo && uo !== headerSelectedUo.replace(/[^\d]/g, '')) return false;
       return normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA'])) === ultimaData;
-    });
+    }));
   }
   const controleRows = filtrarControleRowsAndon();
-  let listaEquipes = montarLinhasModalEquipes(reportRows, 'todas', controleRows);
+  let listaEquipes = montarLinhasModalEquipes(reportRows, 'todas', controleRows, { apenasComInicioJornada: true });
   if (!listaEquipes.length) {
     const rowsFallback = await carregarEquipesSdcaFallback();
     listaEquipes = rowsFallback.map((row) => {
@@ -3775,7 +6142,7 @@ async function abrirModalSdcaTotalEquipes() {
         inicioJornada: obterHoraTexto(obterValorPrimeiro(row, ['INICIO_JORNADA'])),
         ultimoAtendimento: obterHoraTexto(obterValorPrimeiro(row, ['ULTIMO_ATENDIMENTO']))
       };
-    });
+    }).filter((item) => Number.isFinite(horaParaMinutos(item.inicioJornada)));
   }
   const codigosVisiveis = new Set(listaEquipes.map((item) => String(item.codigo || '').trim()).filter(Boolean));
   const registros = obterRegistrosSdcaAndon(codigosVisiveis);
@@ -3846,7 +6213,7 @@ async function abrirModalSdcaTotalEquipes() {
 }
 
 function atualizarCardsJornadaTrabalho() {
-  const reportRows = filtrarReportRowsAndon();
+  const reportRows = filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
   const folhaRows = filtrarFolhaPontoRowsAndon();
   const jornada = calcularJornadaTrabalho(reportRows, folhaRows);
 
@@ -3885,9 +6252,9 @@ function atualizarCardsJornadaProdutivaVazios() {
 }
 
 function atualizarCardsJornadaProdutiva() {
-  const reportRows = filtrarReportRowsAndon();
-  const controleRows = filtrarControleRowsAndon();
-  const listaEquipes = montarLinhasModalEquipes(reportRows, 'todas', controleRows);
+  const reportRows = filtrarReportRowsPorDiasComInicioJornada(filtrarReportRowsAndon());
+  const controleRows = obterControleRowsPorCodigos(obterCodigosReportRows(reportRows));
+  const listaEquipes = montarLinhasModalEquipes(reportRows, 'todas', controleRows, { apenasComInicioJornada: true });
 
   if (!listaEquipes.length) {
     atualizarCardsJornadaProdutivaVazios();
@@ -3914,9 +6281,10 @@ function atualizarCardsJornadaProdutiva() {
   const mediaPrimeiro = mediaNumericaAndon(minutosPrimeiro);
   const mediaUltimo = mediaNumericaAndon(minutosUltimo);
   const mediaJornada = mediaNumericaAndon(minutosJornada);
-  const percIncompleta = listaEquipes.length > 0 ? (jornadasIncompletas / listaEquipes.length) * 100 : 0;
+  const totalEfetiva = listaEquipes.length;
+  const percIncompleta = totalEfetiva > 0 ? (jornadasIncompletas / totalEfetiva) * 100 : 0;
 
-  if (journeyProdTotalEfetiva) journeyProdTotalEfetiva.textContent = formatInt(listaEquipes.length);
+  if (journeyProdTotalEfetiva) journeyProdTotalEfetiva.textContent = formatInt(totalEfetiva);
   if (journeyProdMedPrimeiroAtend) journeyProdMedPrimeiroAtend.textContent = formatHoraMedia(mediaPrimeiro);
   if (journeyProdMedUltimoAtend) journeyProdMedUltimoAtend.textContent = formatHoraMedia(mediaUltimo);
   if (journeyProdSemRefeicao) journeyProdSemRefeicao.textContent = formatInt(semRefeicao);
@@ -3974,47 +6342,19 @@ function formatarComparativoLoteSupervisor(loteProd = {}) {
 }
 
 function calcularSdcaSupervisor(rows = []) {
-  const baseTotal = obterEquipesDBaseTotal(rows);
-  const { mapa } = obterResumoEquipesHoraAtual(rows);
-  const codigosVisiveis = new Set(Array.from(mapa.keys()).map((codigo) => String(codigo)));
-  const registros = obterRegistrosSdcaAndon(codigosVisiveis);
-  const acordadas = new Set();
-  const justificadas = new Set();
-
-  registros.forEach((registro) => {
-    Object.values(registro && registro.acordos || {}).forEach((acordo) => {
-      const codigo = String(acordo && acordo.codigo || '').trim();
-      if (codigo && codigosVisiveis.has(codigo)) acordadas.add(codigo);
-    });
-    Object.values(registro && registro.justificativas || {}).forEach((item) => {
-      const codigo = String(item && item.codigo || '').trim();
-      const texto = String(item && item.justificativa || '').trim();
-      if (codigo && texto && codigosVisiveis.has(codigo)) justificadas.add(codigo);
-    });
-  });
-
-  const totalEquipes = baseTotal.totalEquipes || mapa.size;
-  const totalAcordadas = acordadas.size;
-  const totalJustificadas = justificadas.size;
-
-  return {
-    totalEquipes,
-    equipesD: baseTotal.equipesD.size,
-    acordadas: totalAcordadas,
-    justificadas: totalJustificadas,
-    percJustificadas: totalEquipes > 0 ? (totalJustificadas / totalEquipes) * 100 : 0
-  };
+  return calcularSdcaMetricas(rows);
 }
 
 function calcularJornadaSupervisor(rows = []) {
-  const controleRows = obterControleRowsPorCodigos(obterCodigosReportRows(rows));
-  const listaEquipes = montarLinhasModalEquipes(rows, 'todas', controleRows);
+  const rowsComInicio = filtrarReportRowsPorDiasComInicioJornada(rows);
+  const controleRows = obterControleRowsPorCodigos(obterCodigosReportRows(rowsComInicio));
+  const listaEquipes = montarLinhasModalEquipes(rowsComInicio, 'todas', controleRows, { apenasComInicioJornada: true });
   const minutosPrimeiro = listaEquipes.map((item) => horaParaMinutos(item.primeiroAtendimento)).filter((valor) => Number.isFinite(valor));
   const minutosUltimo = listaEquipes.map((item) => horaParaMinutos(item.ultimoAtendimento)).filter((valor) => Number.isFinite(valor));
   const minutosJornada = listaEquipes
     .map((item) => horaParaMinutos(item.jornadaProdutiva))
     .filter((valor) => Number.isFinite(valor) && valor >= 0 && valor <= (12 * 60));
-  const codigosSemRefeicao = obterCodigosEquipesSemRefeicao(rows, listaEquipes);
+  const codigosSemRefeicao = obterCodigosEquipesSemRefeicao(rowsComInicio, listaEquipes);
 
   return {
     listaEquipes,
@@ -4057,15 +6397,18 @@ function inicializarMetricasPerformanceSupervisor() {
           }
 
           const filtro = role === 'equipes-d-wm' ? 'd' : 'todas';
-          const codigosD = new Set(Array.from(obterEquipesDBaseTotal(rows).equipesD));
-          const codigosControle = filtro === 'd' ? codigosD : obterCodigosReportRows(rows);
+          const apenasComInicioJornada = role === 'total-equipes' || role === 'equipes-d-wm';
+          const rowsModal = apenasComInicioJornada ? filtrarReportRowsComInicioJornada(rows) : rows;
+          const codigosD = new Set(Array.from(obterEquipesDBaseTotal(rowsModal).equipesD));
+          const codigosControle = filtro === 'd' ? codigosD : obterCodigosReportRows(rowsModal);
           const controleRows = obterControleRowsPorCodigos(codigosControle);
           abrirModalEquipesAndonContexto({
             filtro,
-            rows,
+            rows: rowsModal,
             controleRows,
             title: `${filtro === 'd' ? 'Equipes D WM' : 'Total de Equipes'} - ${card.dataset.supervisor || ''}`,
-            meta: `Supervisor: ${card.dataset.supervisor || '-'} | U.O.: ${card.dataset.uo || '-'} | Equipes: ${formatInt(filtro === 'd' ? codigosD.size : obterCodigosReportRows(rows).size)}`
+            meta: `Supervisor: ${card.dataset.supervisor || '-'} | U.O.: ${card.dataset.uo || '-'} | Equipes: ${formatInt(filtro === 'd' ? codigosD.size : obterCodigosReportRows(rowsModal).size)}`,
+            apenasComInicioJornada
           });
         });
         metrica.dataset.metricBound = '1';
@@ -4079,7 +6422,7 @@ function inicializarMetricasPerformanceSupervisor() {
         metrica.addEventListener('click', () => {
           const role = metrica.dataset.metricRole;
           const filtro = role === 'equipes-d' ? 'd' : role;
-          const rows = obterRowsSupervisorCard(card);
+          const rows = filtrarReportRowsComInicioJornada(obterRowsSupervisorCard(card));
           const controleRows = obterControleRowsPorCodigos(obterCodigosReportRows(rows));
           const titles = {
             'total-equipes': 'Total de Equipes',
@@ -4093,7 +6436,8 @@ function inicializarMetricasPerformanceSupervisor() {
             rows,
             controleRows,
             title: `${titles[role] || 'Equipes'} - ${card.dataset.supervisor || ''}`,
-            meta: `Supervisor: ${card.dataset.supervisor || '-'} | U.O.: ${card.dataset.uo || '-'}`
+            meta: `Supervisor: ${card.dataset.supervisor || '-'} | U.O.: ${card.dataset.uo || '-'}`,
+            apenasComInicioJornada: true
           });
         });
         metrica.dataset.metricBound = '1';
@@ -4207,19 +6551,20 @@ function atualizarSupervisorPerformanceCards() {
       ])
     );
     const baseTotal = obterEquipesDBaseTotal(rows);
-    const percentualTotal = baseTotal.totalMetaDia > 0
-      ? (baseTotal.totalProdDia / baseTotal.totalMetaDia) * 100
+    const baseTotalComInicio = obterEquipesDBaseTotalComInicioJornada(rows);
+    const percentualTotal = baseTotalComInicio.totalMetaDia > 0
+      ? (baseTotalComInicio.totalProdDia / baseTotalComInicio.totalMetaDia) * 100
       : NaN;
     const impedimento = obterImpedimentoPorCodigos(obterCodigosReportRows(rows));
     const loteProd = obterLoteProdSupervisor(rows);
 
-    if (performanceValores['total-equipes']) performanceValores['total-equipes'].textContent = formatInt(baseTotal.totalEquipes);
+    if (performanceValores['total-equipes']) performanceValores['total-equipes'].textContent = formatInt(obterTotalEquipesComInicioJornada(rows));
     if (performanceValores['classificacao-wm']) performanceValores['classificacao-wm'].textContent = formatClassificacao(percentualTotal);
     if (performanceValores['classificacao-lote']) performanceValores['classificacao-lote'].textContent = loteProd.classificacao;
-    if (performanceValores['equipes-d-wm']) performanceValores['equipes-d-wm'].textContent = formatInt(baseTotal.equipesD.size);
+    if (performanceValores['equipes-d-wm']) performanceValores['equipes-d-wm'].textContent = formatInt(obterEquipesDBaseTotalComInicioJornada(rows).equipesD.size);
     if (performanceValores['equipes-d-lote']) {
-      performanceValores['equipes-d-lote'].classList.add('metric-value-compact');
-      performanceValores['equipes-d-lote'].textContent = formatarComparativoLoteSupervisor(loteProd);
+      performanceValores['equipes-d-lote'].classList.remove('metric-value-compact');
+      performanceValores['equipes-d-lote'].textContent = formatInt(loteProd.equipesD);
       performanceValores['equipes-d-lote'].title = `D Lote: ${formatInt(loteProd.equipesD)} | WM e Lote: ${formatInt(loteProd.wmELote)} | Somente WM: ${formatInt(loteProd.somenteWm)} | Somente Lote: ${formatInt(loteProd.somenteLote)}`;
     }
     if (performanceValores['impedimento']) performanceValores['impedimento'].textContent = formatPercent(impedimento);
@@ -4360,6 +6705,65 @@ function obterRegistrosSdcaAndon(codigosVisiveis = new Set()) {
   });
 }
 
+function obterChaveSdcaAcumulada(codigo, dataIso = '') {
+  const codigoTexto = String(codigo || '').trim();
+  if (!codigoTexto) return '';
+  if (!filtroPeriodoMultiDiaAtivo()) return codigoTexto;
+  const dataTexto = normalizarDataIso(dataIso);
+  return dataTexto ? `${codigoTexto}__${dataTexto}` : '';
+}
+
+function calcularSdcaMetricas(rows = []) {
+  const rowsSdca = filtrarReportRowsComInicioJornada(rows);
+  const baseTotal = obterEquipesDBaseTotal(rowsSdca);
+  const codigosVisiveis = obterCodigosReportRows(rowsSdca);
+  const chavesVisiveis = new Set();
+
+  rowsSdca.forEach((row) => {
+    if (filtroPeriodoMultiDiaAtivo() && !linhaReportPossuiInicioJornada(row)) return;
+    const codigo = obterCodigoEquipeLinha(row);
+    const dataIso = normalizarDataIso(obterValorPrimeiro(row, ['Data', 'DATA']));
+    const chave = obterChaveSdcaAcumulada(codigo, dataIso);
+    if (chave) chavesVisiveis.add(chave);
+  });
+
+  const registros = obterRegistrosSdcaAndon(codigosVisiveis);
+  const acordadas = new Set();
+  const justificadas = new Set();
+
+  registros.forEach((registro) => {
+    const dataRegistro = normalizarDataIso(String(registro && registro.data || '').trim());
+    Object.values(registro && registro.acordos || {}).forEach((acordo) => {
+      const codigo = String(acordo && acordo.codigo || '').trim();
+      const chave = obterChaveSdcaAcumulada(codigo, dataRegistro);
+      if (codigo && codigosVisiveis.has(codigo) && (!chavesVisiveis.size || chavesVisiveis.has(chave))) {
+        acordadas.add(chave || codigo);
+      }
+    });
+    Object.values(registro && registro.justificativas || {}).forEach((item) => {
+      const codigo = String(item && item.codigo || '').trim();
+      const texto = String(item && item.justificativa || '').trim();
+      const chave = obterChaveSdcaAcumulada(codigo, dataRegistro);
+      if (codigo && texto && codigosVisiveis.has(codigo) && (!chavesVisiveis.size || chavesVisiveis.has(chave))) {
+        justificadas.add(chave || codigo);
+      }
+    });
+  });
+
+  const totalEquipes = filtroPeriodoMultiDiaAtivo()
+    ? contarEquipesDiasComInicioJornada(rows)
+    : baseTotal.totalEquipes;
+
+  return {
+    totalEquipes,
+    equipesD: baseTotal.equipesD.size,
+    acordadas: acordadas.size,
+    justificadas: justificadas.size,
+    percAcordadas: totalEquipes > 0 ? (acordadas.size / totalEquipes) * 100 : 0,
+    percJustificadas: totalEquipes > 0 ? (justificadas.size / totalEquipes) * 100 : 0
+  };
+}
+
 function obterCodigosSdcaPorTipo(rows = [], tipo = 'acordadas') {
   const { mapa } = obterResumoEquipesHoraAtual(rows);
   const codigosVisiveis = new Set(Array.from(mapa.keys()).map((codigo) => String(codigo)));
@@ -4434,27 +6838,7 @@ function calcularPerformance(rows = []) {
 }
 
 function obterEquipesDBaseTotal(rows = []) {
-  const mapa = new Map();
-
-  rows.forEach((row) => {
-    const codigo = obterCodigoEquipeLinha(row);
-    if (!codigo) return;
-
-    const atual = mapa.get(codigo) || { metaDia: 0, prodDia: 0 };
-    atual.metaDia = Math.max(
-      atual.metaDia,
-      ajustarMetaClusterMtamiAndon(
-        toNumberSafe(obterValorPrimeiro(row, ['Meta Prog.', 'META PROG', 'META_PROG'])),
-        obterValorPrimeiro(row, ['SUPERVISOR - SETOR', 'NOME_SUPERVISOR']),
-        obterValorPrimeiro(row, ['Nome', 'NOME_EQUIPE', 'NOME'])
-      )
-    );
-    atual.prodDia = Math.max(
-      atual.prodDia,
-      toNumberSafe(obterValorPrimeiro(row, ['Produção', 'PRODUÇÃO', 'PRODUCAO']))
-    );
-    mapa.set(codigo, atual);
-  });
+  const mapa = obterMetricasReportPorEquipe(rows);
 
   const equipesD = new Set();
   mapa.forEach((item, codigo) => {
@@ -4484,40 +6868,15 @@ function atualizarCardsSdcaVazios() {
 }
 
 function atualizarCardsSdca() {
-  const reportRows = filtrarReportRowsAndon();
-  const baseTotal = obterEquipesDBaseTotal(reportRows);
-  const { mapa } = obterResumoEquipesHoraAtual(reportRows);
-  const codigosVisiveisBruto = new Set(Array.from(mapa.keys()).map((codigo) => String(codigo)));
-  const registros = obterRegistrosSdcaAndon(codigosVisiveisBruto);
-  const equipesD = baseTotal.equipesD;
+  const reportRows = filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
+  const sdca = calcularSdcaMetricas(reportRows);
 
-  const acordadas = new Set();
-  const justificadas = new Set();
-  registros.forEach((registro) => {
-    Object.values(registro && registro.acordos || {}).forEach((acordo) => {
-      const codigo = String(acordo && acordo.codigo || '').trim();
-      if (codigo) acordadas.add(codigo);
-    });
-    Object.values(registro && registro.justificativas || {}).forEach((item) => {
-      const codigo = String(item && item.codigo || '').trim();
-      const texto = String(item && item.justificativa || '').trim();
-      if (codigo && texto) justificadas.add(codigo);
-    });
-  });
-
-  const totalEquipes = baseTotal.totalEquipes || mapa.size;
-  const totalEquipesD = equipesD.size;
-  const totalAcordadas = [...codigosVisiveisBruto].filter((codigo) => acordadas.has(codigo)).length;
-  const totalJustificadas = [...codigosVisiveisBruto].filter((codigo) => justificadas.has(codigo)).length;
-  const percAcordadas = totalEquipes > 0 ? (totalAcordadas / totalEquipes) * 100 : 0;
-  const percJustificadas = totalEquipes > 0 ? (totalJustificadas / totalEquipes) * 100 : 0;
-
-  if (sdcaTotalEquipes) sdcaTotalEquipes.textContent = formatInt(totalEquipes);
-  if (sdcaEquipesD) sdcaEquipesD.textContent = formatInt(totalEquipesD);
-  if (sdcaEquipesAcordadas) sdcaEquipesAcordadas.textContent = formatInt(totalAcordadas);
-  if (sdcaPercAcordadas) sdcaPercAcordadas.textContent = formatPercent(percAcordadas);
-  if (sdcaEquipesJustificadas) sdcaEquipesJustificadas.textContent = formatInt(totalJustificadas);
-  if (sdcaPercJustificadas) sdcaPercJustificadas.textContent = formatPercent(percJustificadas);
+  if (sdcaTotalEquipes) sdcaTotalEquipes.textContent = formatInt(sdca.totalEquipes);
+  if (sdcaEquipesD) sdcaEquipesD.textContent = formatInt(sdca.equipesD);
+  if (sdcaEquipesAcordadas) sdcaEquipesAcordadas.textContent = formatInt(sdca.acordadas);
+  if (sdcaPercAcordadas) sdcaPercAcordadas.textContent = formatPercent(sdca.percAcordadas);
+  if (sdcaEquipesJustificadas) sdcaEquipesJustificadas.textContent = formatInt(sdca.justificadas);
+  if (sdcaPercJustificadas) sdcaPercJustificadas.textContent = formatPercent(sdca.percJustificadas);
 }
 
 function supervisorViewEstaAberta() {
@@ -4530,7 +6889,7 @@ function atualizarSupervisorPerformanceCardsSeVisivel() {
   }
 }
 
-function atualizarDashboardAndon() {
+function executarAtualizacaoDashboardAndon() {
   atualizarCardsPerformance();
   atualizarCardsSdca();
   atualizarCardsJornadaProdutiva();
@@ -4564,6 +6923,16 @@ function atualizarDashboardAndon() {
   }
 }
 
+function atualizarDashboardAndon() {
+  if (andonDashboardUpdateTimer) {
+    window.clearTimeout(andonDashboardUpdateTimer);
+  }
+  andonDashboardUpdateTimer = window.setTimeout(() => {
+    andonDashboardUpdateTimer = null;
+    executarAtualizacaoDashboardAndon();
+  }, 80);
+}
+
 function calcularPercentualImpedimento(rows = []) {
   let realizados = 0;
   let improdutivos = 0;
@@ -4586,19 +6955,21 @@ function atualizarCardsPerformance() {
   const loteProd = calcularResumoLoteProd(filtrarLoteProdRowsAndon());
   const totalEquipesLote = calcularTotalEquipesLoteProd();
   const baseTotal = obterEquipesDBaseTotal(reportRows);
+  const baseTotalComInicio = obterEquipesDBaseTotalComInicioJornada(reportRows);
+  const totalEquipesComInicio = obterTotalEquipesComInicioJornada(reportRows);
   const percentualImpedimento = calcularPercentualImpedimento(controleRows);
-  const percentualTotal = baseTotal.totalMetaDia > 0
-    ? (baseTotal.totalProdDia / baseTotal.totalMetaDia) * 100
+  const percentualTotal = baseTotalComInicio.totalMetaDia > 0
+    ? (baseTotalComInicio.totalProdDia / baseTotalComInicio.totalMetaDia) * 100
     : NaN;
 
-  if (perfTotalEquipes) perfTotalEquipes.textContent = formatInt(baseTotal.totalEquipes);
+  if (perfTotalEquipes) perfTotalEquipes.textContent = formatInt(totalEquipesComInicio);
   if (perfTotalEquipesLote) perfTotalEquipesLote.textContent = formatInt(totalEquipesLote);
   const classificacaoWm = formatClassificacao(percentualTotal);
   if (perfClassificacaoWm) perfClassificacaoWm.textContent = classificacaoWm;
   aplicarCorFaixaKpi(cardPerfClassificacaoWm, Number.isFinite(percentualTotal) ? classificarFaixa(percentualTotal) : obterFaixaClassificacaoTexto(classificacaoWm));
   if (perfClassificacaoLote) perfClassificacaoLote.textContent = loteProd.classificacao;
   aplicarCorFaixaKpi(cardPerfClassificacaoLote, obterFaixaClassificacaoTexto(loteProd.classificacao));
-  if (perfEquipesDWm) perfEquipesDWm.textContent = formatInt(baseTotal.equipesD.size);
+  if (perfEquipesDWm) perfEquipesDWm.textContent = formatInt(baseTotalComInicio.equipesD.size);
   if (perfEquipesDLote) perfEquipesDLote.textContent = formatInt(loteProd.equipesD);
   if (perfImpedimento) perfImpedimento.textContent = formatPercent(percentualImpedimento);
   aplicarCorPercentualKpi(perfImpedimento, percentualImpedimento);
@@ -4608,15 +6979,16 @@ async function carregarDadosAndon() {
   if (andonLoadingPromise) return andonLoadingPromise;
 
   andonLoadingPromise = (async () => {
+    const reportUrl = '/api/report?strictHours=false&onlyStartedJourney=false';
     const [reportResp, loteProdResp, loteProdEquipesDResp, acordosBanco] = await Promise.all([
-      fetch('/api/report?strictHours=false', { cache: 'no-store' }),
+      fetch(reportUrl, { cache: 'no-store' }),
       fetch('/api/lote-prod', { cache: 'no-store' }),
       fetch('/api/lote-prod/equipes-d', { cache: 'no-store' }),
       carregarBaseAcordosBancoAndon()
     ]);
 
     if (!reportResp.ok) {
-      throw new Error(`Erro ao carregar /api/report?strictHours=false (${reportResp.status}).`);
+      throw new Error(`Erro ao carregar ${reportUrl} (${reportResp.status}).`);
     }
 
     const reportPayload = await reportResp.json();
@@ -5180,7 +7552,18 @@ function vincularModalCard(card, handler) {
 }
 
 if (cardPerfTotalEquipes) {
-  vincularModalCard(cardPerfTotalEquipes, () => abrirModalEquipesAndon('todas'));
+  vincularModalCard(cardPerfTotalEquipes, () => {
+    const rows = filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
+    abrirModalEquipesAndonContexto({
+      filtro: 'todas',
+      rows,
+      controleRows: obterControleRowsPorCodigos(obterCodigosReportRows(rows)),
+      title: 'Total de Equipes',
+      meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes com início de jornada: ${formatInt(obterCodigosReportRows(rows).size)}`,
+      apenasComInicioJornada: true,
+      tipoModal: 'performance'
+    });
+  });
 }
 
 if (cardPerfTotalEquipesLote) {
@@ -5188,18 +7571,47 @@ if (cardPerfTotalEquipesLote) {
 }
 
 if (cardPerfEquipesDWm) {
-  vincularModalCard(cardPerfEquipesDWm, () => abrirModalEquipesAndon('d'));
+  vincularModalCard(cardPerfEquipesDWm, () => {
+    const rows = filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
+    const baseD = obterEquipesDBaseTotal(rows);
+    abrirModalEquipesAndonContexto({
+      filtro: 'd',
+      rows,
+      controleRows: obterControleRowsPorCodigos(baseD.equipesD),
+      title: 'Equipes D WM',
+      meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes D com inÃ­cio de jornada: ${formatInt(baseD.equipesD.size)}`,
+      apenasComInicioJornada: true,
+      tipoModal: 'performance'
+    });
+  });
 }
 
 if (cardPerfEquipesDLote) {
   vincularModalCard(cardPerfEquipesDLote, abrirModalEquipesDLoteProd);
 }
 
-vincularModalCard(cardPerfClassificacaoWm, () => abrirModalEquipesAndon('todas'));
+vincularModalCard(cardPerfClassificacaoWm, () => abrirModalEquipesAndonContexto({
+  filtro: 'todas',
+  rows: filtrarReportRowsComInicioJornada(filtrarReportRowsAndon()),
+  title: 'Classificacao WM',
+  meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Registros: ${perfTotalEquipes?.textContent || '0'}`,
+  apenasComInicioJornada: true,
+  tipoModal: 'performance'
+}));
 vincularModalCard(cardPerfClassificacaoLote, abrirModalLoteProdDetalhes);
 vincularModalCard(cardPerfImpedimento, () => abrirModalControleServicoModelo('improdutivos', 'Impedimento'));
 vincularModalCard(cardSdcaTotalEquipes, abrirModalSdcaTotalEquipes);
-vincularModalCard(cardSdcaEquipesD, () => abrirModalEquipesAndon('d'));
+vincularModalCard(cardSdcaEquipesD, () => {
+  const rows = filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
+  abrirModalEquipesAndonContexto({
+    filtro: 'd',
+    rows,
+    controleRows: obterControleRowsPorCodigos(obterEquipesDBaseTotal(rows).equipesD),
+    title: 'Equipes D - Ações SDCA',
+    meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes D com início de jornada: ${formatInt(obterEquipesDBaseTotal(rows).equipesD.size)}`,
+    apenasComInicioJornada: true
+  });
+});
 
 if (cardSdcaEquipesAcordadas) {
   vincularModalCard(cardSdcaEquipesAcordadas, abrirModalEquipesAcordadasDetalhado);
@@ -5210,17 +7622,25 @@ if (cardSdcaEquipesJustificadas) {
 }
 
 vincularModalCard(cardSdcaPercAcordadas, () => {
+  const rows = filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
   abrirModalEquipesAndonContexto({
     filtro: 'acordadas',
+    rows,
+    controleRows: obterControleRowsPorCodigos(obterCodigosReportRows(rows)),
     title: '% Equipes Acordadas',
-    meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${sdcaEquipesAcordadas?.textContent || '0'}`
+    meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${sdcaEquipesAcordadas?.textContent || '0'}`,
+    apenasComInicioJornada: true
   });
 });
 vincularModalCard(cardSdcaPercJustificadas, () => {
+  const rows = filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
   abrirModalEquipesAndonContexto({
     filtro: 'justificadas',
+    rows,
+    controleRows: obterControleRowsPorCodigos(obterCodigosReportRows(rows)),
     title: '% Equipes Justificadas',
-    meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${sdcaEquipesJustificadas?.textContent || '0'}`
+    meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes: ${sdcaEquipesJustificadas?.textContent || '0'}`,
+    apenasComInicioJornada: true
   });
 });
 
@@ -5234,7 +7654,17 @@ if (cardJourneyProdSemRefeicao) {
   vincularModalCard(cardJourneyProdSemRefeicao, abrirModalRefeicaoSemRegistro);
 }
 
-vincularModalCard(cardJornadaTrabalhoTotal, () => abrirModalEquipesAndon('todas'));
+vincularModalCard(cardJornadaTrabalhoTotal, () => {
+  const rows = filtrarReportRowsComInicioJornada(filtrarReportRowsAndon());
+  abrirModalEquipesAndonContexto({
+    filtro: 'todas',
+    rows,
+    controleRows: obterControleRowsPorCodigos(obterCodigosReportRows(rows)),
+    title: 'Total de Equipes Efetiva - Jornada de Trabalho',
+    meta: `U.O.: ${headerUoDisplay?.value || 'Todas as U.O.'} | Equipes com inÃ­cio de jornada: ${formatInt(obterCodigosReportRows(rows).size)}`,
+    apenasComInicioJornada: true
+  });
+});
 
 if (cardJornadaTrabalhoAtraso) {
   vincularModalCard(cardJornadaTrabalhoAtraso, () => {
@@ -5287,8 +7717,32 @@ if (equipesModalExportImage) {
   equipesModalExportImage.addEventListener('click', exportarImagemModalEquipes);
 }
 
+const equipesModalAnaliseJustificadas = obterBotaoAnaliseJustificadasModal();
+if (equipesModalAnaliseJustificadas) {
+  equipesModalAnaliseJustificadas.addEventListener('click', () => {
+    const emAnalise = equipesModal?.classList.contains('andon-modal-justificadas-analytics');
+    if (emAnalise) {
+      abrirModalEquipesJustificadasDetalhado();
+      return;
+    }
+    renderizarAnaliseJustificadasModal('');
+  });
+}
+
 if (equipesModalBody) {
   equipesModalBody.addEventListener('click', (event) => {
+    const alvoHistoricoPerformance = event.target.closest('.andon-performance-hist-btn');
+    if (alvoHistoricoPerformance) {
+      abrirHistoricoPerformanceEquipe(alvoHistoricoPerformance.dataset.performanceHistCodigo || '');
+      return;
+    }
+
+    const alvoHistoricoJust = event.target.closest('.andon-just-hist-btn');
+    if (alvoHistoricoJust) {
+      abrirHistoricoJustificadasEquipe(modalJustificadasAnaliseEstado.historico?.get(alvoHistoricoJust.dataset.justHistId) || {});
+      return;
+    }
+
     const alvoDias = event.target.closest('.andon-dias-trab-btn, .andon-dias-trab-cell');
     if (!alvoDias) return;
     event.preventDefault();
@@ -5705,9 +8159,8 @@ function updateWeekDisplay() {
   const startStr = periodStart.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   const endStr = periodEnd.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
   headerDateDisplay.value = `${weekNums}  (${startStr} – ${endStr})`;
-  // Sincroniza filtro de MÊS com o início do período
-  headerSelectedMonth = { year: periodStart.getFullYear(), month: periodStart.getMonth() };
-  headerMonthDisplay.value = fmtHeaderMonth(periodStart.getFullYear(), periodStart.getMonth());
+  headerSelectedMonth = null;
+  headerMonthDisplay.value = '';
   headerMonthPickerYear = periodStart.getFullYear();
   garantirSupervisorSelecionadoDisponivel();
   renderHeaderSupervisorOptions();
@@ -5717,9 +8170,8 @@ function selectHeaderDate(date) {
   headerSelectedDate = date;
   headerSelectedWeeks = []; // limpa seleção de semanas
   headerDateDisplay.value = fmtHeaderDate(date);
-  // Sincroniza o filtro de MÊS
-  headerSelectedMonth = { year: date.getFullYear(), month: date.getMonth() };
-  headerMonthDisplay.value = fmtHeaderMonth(date.getFullYear(), date.getMonth());
+  headerSelectedMonth = null;
+  headerMonthDisplay.value = '';
   headerMonthPickerYear = date.getFullYear();
   garantirSupervisorSelecionadoDisponivel();
   renderHeaderSupervisorOptions();
@@ -5839,11 +8291,9 @@ function selectHeaderMonth(year, month) {
   headerSelectedMonth = { year, month };
   headerMonthDisplay.value = fmtHeaderMonth(year, month);
   headerMonthPickerYear = year;
-  // Se a data selecionada não pertence a este mês, limpa a data
-  if (headerSelectedDate && (headerSelectedDate.getFullYear() !== year || headerSelectedDate.getMonth() !== month)) {
-    headerSelectedDate = null;
-    headerDateDisplay.value = '';
-  }
+  headerSelectedDate = null;
+  headerSelectedWeeks = [];
+  headerDateDisplay.value = '';
   // Navega o calendário de dia para o mês escolhido
   headerDatePickerMonth = new Date(year, month, 1);
   garantirSupervisorSelecionadoDisponivel();
