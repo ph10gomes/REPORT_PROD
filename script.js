@@ -251,6 +251,7 @@ const HORAS_ACUM = {
     "15": 7.2,
     "17": 9
 };
+const INTERVALO_ATUALIZACAO_TABELA_GERAL_MS = 60 * 60 * 1000;
 
 const CONTROLE_SERVICO_COLS = [
     { key: "equipe", label: "EQUIPES", candidates: ["NOME", "NOME_EQUIPE", "EQUIPE"] },
@@ -293,6 +294,7 @@ const cacheControleServicoResumo = new Map();
 const cacheLinhasDataUo = new Map();
 const cacheUltimaFaixa = new Map();
 const cacheCodigosTurno = new Map();
+const cacheLoteProdEquipesTabelaGeral = new Map();
 
 window.addEventListener("message", (event) => {
     if (!iframeReportJornada || event.source !== iframeReportJornada.contentWindow) return;
@@ -453,6 +455,40 @@ function normalizarHora(h) {
     return String(n).padStart(2, "0");
 }
 
+function dataEhSextaFeira(dataRef) {
+    const s = String(dataRef || "").trim();
+    let iso = "";
+
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+        iso = s.slice(0, 10);
+    } else if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) {
+        const [dia, mes, ano] = s.slice(0, 10).split("/");
+        iso = `${ano}-${mes.padStart(2, "0")}-${dia.padStart(2, "0")}`;
+    }
+
+    if (!iso) return false;
+
+    const data = new Date(`${iso}T00:00:00`);
+    return !Number.isNaN(data.getTime()) && data.getDay() === 5;
+}
+
+function obterHoraAcordoDia(dataRef = dataSelect?.value || "") {
+    return dataEhSextaFeira(dataRef) ? "11" : "13";
+}
+
+function obterHoraFechamentoAcordoDia(dataRef = dataSelect?.value || "") {
+    return dataEhSextaFeira(dataRef) ? "16" : "17";
+}
+
+function horaEhMomentoAcordo(hora, dataRef = dataSelect?.value || "") {
+    return normalizarHora(hora) === obterHoraAcordoDia(dataRef);
+}
+
+function obterHorasPainelAcordos(dataRef = dataSelect?.value || "") {
+    const horaFechamento = obterHoraFechamentoAcordoDia(dataRef);
+    return ["09", "11", "13", "15", horaFechamento].filter((hora, idx, arr) => arr.indexOf(hora) === idx);
+}
+
 function normalizarDataExcel(v) {
     if (v === null || v === undefined || v === "") return "";
 
@@ -564,6 +600,7 @@ function limparCachesDadosPainel() {
     cacheLinhasDataUo.clear();
     cacheUltimaFaixa.clear();
     cacheCodigosTurno.clear();
+    cacheLoteProdEquipesTabelaGeral.clear();
     cacheFaixas = {};
 }
 
@@ -1096,6 +1133,20 @@ function calcularPrevisaoNotaFinal(prod) {
     return p + tendencia;
 }
 
+function calcularPrevisaoAcordo(prod, horaMomento, dataRef = dataSelect?.value || "") {
+    const p = Number(prod || 0);
+    const horaBase = normalizarHora(horaMomento) || obterHoraAcordoDia(dataRef);
+    const horaFechamento = obterHoraFechamentoAcordoDia(dataRef);
+    const horasBase = obterHorasAcumuladas(horaBase);
+    const horasFechamento = obterHorasAcumuladas(horaFechamento);
+
+    if (!horasBase || !horasFechamento || horasBase >= horasFechamento) {
+        return p;
+    }
+
+    return p * (horasFechamento / horasBase);
+}
+
 function turnoComercialAtivo() {
     return String(turnoSelect?.value || "").trim().toUpperCase() === "COMERCIAL";
 }
@@ -1610,7 +1661,7 @@ function montarParametrosDadosPainel({ forcarTotalHoras = false } = {}) {
     const uo = String(uoSelect?.value || "").trim();
     qs.set("compact", "1");
 
-    if (forcarTotalHoras || modoTabela === "total-horas") {
+    if (forcarTotalHoras || modoTabela === "total-horas" || modoTabela === "geral") {
         qs.set("strictHours", "false");
     }
 
@@ -1696,6 +1747,17 @@ async function carregarDadosPainelAtual({ forcar = false, forcarTotalHoras = fal
     }
 }
 
+async function atualizarTabelaGeralComDadosDoBanco() {
+    if (modoTabela !== "geral") return;
+
+    const ok = await carregarDadosPainelAtual({ forcar: true });
+    if (!ok || modoTabela !== "geral") return;
+
+    atualizarOpcoesHora();
+    await aplicar();
+    carregarStatusDados();
+}
+
 function obterHorasAcumuladas(hora) {
     const hh = normalizarHora(hora);
     if (!hh) return 0;
@@ -1771,16 +1833,22 @@ function montarCabecalho(tipo, incluirPeriodo = false, horasVisiveis = FAIXAS) {
     `;
 }
 
-function montarCabecalhoGeral(tipo) {
+function montarCabecalhoGeral(tipo, usarLote = false) {
     const colunas = [
         tipo,
         "Meta Dia",
         "Produção",
         "Faixa Dia",
         "% PROD.DIA",
-        "Previsão Dia",
-        "Prev. % Meta",
-        "Prev. Faixa",
+        ...(usarLote ? [
+            "Prod. Lote",
+            "% PROD.LOTE",
+            "Faixa Lote"
+        ] : [
+            "Previsão Dia",
+            "Prev. % Meta",
+            "Prev. Faixa"
+        ]),
         "Total Eq.",
         "Med. Serv. Design.",
         "Med. Serv.",
@@ -3172,19 +3240,24 @@ function toggleAcordoEquipe(codigo) {
     atualizarBotaoAcordos17();
 }
 
-function reabrirModalAtual() {
+async function reabrirModalAtual(options = {}) {
     if (!currentModalContext) return;
+    const ordenacaoAnterior = options.preservarOrdenacao && modalEquipesOrdenacao?.coluna != null
+        ? { ...modalEquipesOrdenacao }
+        : null;
 
     if (currentModalContext.tipoModal === "faixa") {
-        abrirModalFaixa(currentModalContext.supervisor, currentModalContext.horaClicada);
+        await abrirModalFaixa(currentModalContext.supervisor, currentModalContext.horaClicada);
+        restaurarOrdenacaoModalAposRender(ordenacaoAnterior);
         return;
     }
 
-    abrirModalEquipes(
+    await abrirModalEquipes(
         currentModalContext.supervisor || null,
         currentModalContext.faixaClicada || null,
         currentModalContext.horaClicada
     );
+    restaurarOrdenacaoModalAposRender(ordenacaoAnterior);
 }
 
 function posicionarPainelJustificativa(alvo) {
@@ -3424,7 +3497,7 @@ function salvarJustificativaAtual() {
     salvarRegistroAcordo(currentModalContext, regAtual);
     registrarHistoricoJustificativa(currentModalContext, regAtual.justificativas[codStr], "SALVAR");
     fecharPainelJustificativa();
-    reabrirModalAtual();
+    reabrirModalAtual({ preservarOrdenacao: true });
 }
 
 function excluirJustificativaAtual() {
@@ -3446,7 +3519,7 @@ function excluirJustificativaAtual() {
         registrarHistoricoJustificativa(currentModalContext, justificativaAnterior, "EXCLUIR");
     }
     fecharPainelJustificativa();
-    reabrirModalAtual();
+    reabrirModalAtual({ preservarOrdenacao: true });
 }
 
 function extrairMotivoJustificativa(texto) {
@@ -3936,9 +4009,10 @@ function renderizarHistoricoAcordosTabela(mensagem = "") {
     `).join("")}`;
 }
 
-function renderizarCabecalhoContextoAcordos(horaReferencia = "17") {
+function renderizarCabecalhoContextoAcordos(horaReferencia = "17", dataRef = dataSelect?.value || "") {
     if (!theadAcordosRow) return;
-    const rotulosAcordo = obterRotulosPainelAcordos(horaReferencia);
+    const rotulosAcordo = obterRotulosPainelAcordos(horaReferencia, dataRef);
+    const horasAcordo = obterHorasPainelAcordos(dataRef);
     theadAcordosRow.innerHTML = `
         <th>Cód. Eq.</th>
         <th>Frota</th>
@@ -3947,11 +4021,7 @@ function renderizarCabecalhoContextoAcordos(horaReferencia = "17") {
         <th>Prod. Acordo</th>
         <th>Faixa Acordo</th>
         <th>% PROD. Acordo</th>
-        <th>09h</th>
-        <th>11h</th>
-        <th>13h</th>
-        <th>15h</th>
-        <th>17h</th>
+        ${horasAcordo.map(hora => `<th>${hora}h</th>`).join("")}
         <th>Serv.</th>
         <th>Prod.</th>
         <th>Improd.</th>
@@ -4162,14 +4232,15 @@ function abrirModalJustificativasEquipes() {
         }
 
         const uoCtx = String(uoSelect?.value || "").trim();
-        const listaBase = montarListaEquipesSupervisor(null, "13", dataCtx, uoCtx, null);
+        const horaAcordo = obterHoraAcordoDia(dataCtx);
+        const listaBase = montarListaEquipesSupervisor(null, horaAcordo, dataCtx, uoCtx, null);
         const metaFixa = listaBase.reduce((acc, item) => acc + Number(item.metaDia || 0), 0);
         const prodFixa = listaBase.reduce((acc, item) => acc + Number(item.prodDia || 0), 0);
 
         currentModalContext = {
             tipoModal: "menu-justificativas",
             supervisor: "",
-            horaClicada: "13",
+            horaClicada: horaAcordo,
             faixaClicada: "",
             data: dataCtx,
             uo: uoCtx,
@@ -4283,26 +4354,36 @@ function toggleFullscreenJustificativas() {
     }
 }
 
-function horaEhFechamentoAcordo(hora) {
+function horaEhFechamentoAcordo(hora, dataRef = dataSelect?.value || "") {
     const hh = normalizarHora(hora);
-    return hh === "17" || hh === "18" || hh === "19";
+    return hh === obterHoraFechamentoAcordoDia(dataRef) || hh === "18" || hh === "19";
 }
 
-function horaPermitePainelAcordos(hora) {
+function horaPermitePainelAcordos(hora, dataRef = dataSelect?.value || "") {
     const hh = normalizarHora(hora);
-    return hh === "14" || hh === "15" || hh === "16" || horaEhFechamentoAcordo(hh);
+    const horaNum = Number(hh);
+    const acordoNum = Number(obterHoraAcordoDia(dataRef));
+    const fechamentoNum = Number(obterHoraFechamentoAcordoDia(dataRef));
+
+    if (!Number.isFinite(horaNum) || !Number.isFinite(acordoNum) || !Number.isFinite(fechamentoNum)) {
+        return false;
+    }
+
+    return horaNum >= acordoNum && (horaNum <= fechamentoNum || horaEhFechamentoAcordo(hh, dataRef));
 }
 
-function obterRotulosPainelAcordos(hora) {
+function obterRotulosPainelAcordos(hora, dataRef = dataSelect?.value || "") {
     const hh = normalizarHora(hora);
+    const horaAcordo = obterHoraAcordoDia(dataRef);
+    const horaFechamento = obterHoraFechamentoAcordoDia(dataRef);
 
-    if (hh === "14" || hh === "15" || hh === "16") {
+    if (hh && hh !== horaAcordo && hh !== horaFechamento) {
         return {
             botao: "ANDAMENTO ACORDOS",
             titulo: "ANDAMENTO DOS ACORDOS",
             cumpridoLabel: "Qtde. Eq. Cumprido",
             eficaciaLabel: "Eficacia Parcial do Acordo",
-            colunaAcordo: `ACORDO AS ${hh}H`,
+            colunaAcordo: `ACORDO AS ${horaAcordo}H`,
             colunaStatus: `STATUS<br>ACORDO AS ${hh}H`
         };
     }
@@ -4312,8 +4393,8 @@ function obterRotulosPainelAcordos(hora) {
         titulo: "ACORDOS",
         cumpridoLabel: "Qtde. Eq. Acordo Cumprido",
         eficaciaLabel: "Eficacia do Acordo",
-        colunaAcordo: "ACORDO",
-        colunaStatus: "STATUS<br>ACORDO FIM DO DIA"
+        colunaAcordo: `ACORDO AS ${horaAcordo}H`,
+        colunaStatus: `STATUS<br>ACORDO ${horaFechamento}H`
     };
 }
 
@@ -4323,7 +4404,7 @@ function atualizarBotaoAcordos17() {
     const podeMostrar =
         currentModalContext &&
         (currentModalContext.tipoModal === "faixa" || currentModalContext.tipoModal === "equipes") &&
-        horaPermitePainelAcordos(currentModalContext.horaClicada);
+        horaPermitePainelAcordos(currentModalContext.horaClicada, currentModalContext.data);
 
     if (!podeMostrar) {
         btnAcordos17.classList.add("hidden");
@@ -4331,7 +4412,7 @@ function atualizarBotaoAcordos17() {
         return;
     }
 
-    const rotulos = obterRotulosPainelAcordos(currentModalContext.horaClicada);
+    const rotulos = obterRotulosPainelAcordos(currentModalContext.horaClicada, currentModalContext.data);
     const qtd = Object.keys(obterMapaAcordosPainel(currentModalContext)).length;
     btnAcordos17.textContent = qtd > 0 ? `${rotulos.botao} (${qtd})` : rotulos.botao;
     btnAcordos17.classList.remove("hidden");
@@ -4343,7 +4424,7 @@ function atualizarBotaoAcordosRs() {
     const podeMostrar =
         currentModalContext &&
         (currentModalContext.tipoModal === "faixa" || currentModalContext.tipoModal === "equipes") &&
-        (String(currentModalContext.horaClicada) === "13" || String(currentModalContext.horaClicada) === "15" || String(currentModalContext.horaClicada) === "17");
+        horaPermitePainelAcordos(currentModalContext.horaClicada, currentModalContext.data);
 
     if (!podeMostrar) {
         btnAcordosRs.classList.add("hidden");
@@ -4355,8 +4436,8 @@ function atualizarBotaoAcordosRs() {
     btnAcordosRs.classList.remove("hidden");
 }
 
-function montarStatusAcordoFaixa(faixaDia, horaReferencia = "17") {
-    const fechamento = horaEhFechamentoAcordo(horaReferencia);
+function montarStatusAcordoFaixa(faixaDia, horaReferencia = "17", dataRef = dataSelect?.value || "") {
+    const fechamento = horaEhFechamentoAcordo(horaReferencia, dataRef);
     if (!faixaDia || faixaDia === "-") {
         return {
             texto: "SEM FAIXA DIA",
@@ -4381,7 +4462,7 @@ function montarStatusAcordoFaixa(faixaDia, horaReferencia = "17") {
         texto: fechamento ? "NAO CUMPRIDO" : "PENDENTE",
         classe: fechamento ? "status-acordo-nao" : "status-acordo-pendente",
         chipClasse: fechamento ? "nao" : "pendente",
-        icone: horaReferencia === "17" ? "👎" : "⏳",
+        icone: fechamento ? "👎" : "⏳",
         cumprido: false
     };
 }
@@ -4498,9 +4579,10 @@ function turnoMadrugadaAtivo() {
     return String(turnoSelect?.value || "").trim().toUpperCase() === "MADRUGADA";
 }
 
-function obterHorariosModalEquipes() {
+function obterHorariosModalEquipes(data = dataSelect?.value || "", uo = uoSelect?.value || "") {
     if (turnoTardeAtivo()) return FAIXAS_TARDE;
     if (turnoMadrugadaAtivo()) return FAIXAS_MADRUGADA;
+    if (modoTabela === "geral") return obterListaHorasTabelaGeral(uo, data);
     return modoTabela === "total-horas" ? HORAS_TOTAIS : FAIXAS;
 }
 
@@ -5207,7 +5289,7 @@ function montarListaEquipesSupervisor(supervisor, horaClicada, data, uo, codigos
         String(campoGlobal || ""),
         String(supervisor || ""),
         String(horaClicada || ""),
-        obterHorariosModalEquipes().join(","),
+        obterHorariosModalEquipes(data, uo).join(","),
         codigosTurnoSelecionado ? [...codigosTurnoSelecionado].sort().join(",") : "sem-turno",
         codigosKey
     ].join("|");
@@ -5216,8 +5298,9 @@ function montarListaEquipesSupervisor(supervisor, horaClicada, data, uo, codigos
         return cacheListasModal.get(cacheKey);
     }
 
-    const horariosDia = obterHorariosModalEquipes();
-    const indexFinal = horariosDia.indexOf(horaClicada);
+    const horaClicadaNormalizada = normalizarHora(horaClicada);
+    const horariosDia = obterHorariosModalEquipes(data, uo);
+    const indexFinal = horariosDia.indexOf(horaClicadaNormalizada);
     const horariosVisiveis = indexFinal >= 0 ? horariosDia.slice(0, indexFinal + 1) : horariosDia;
     const setPermitidos = codigosPermitidos
         ? new Set([...codigosPermitidos].map(v => String(v)))
@@ -5259,11 +5342,11 @@ function montarListaEquipesSupervisor(supervisor, horaClicada, data, uo, codigos
             return;
         }
 
-        if (hora === horaClicada) {
+        if (hora === horaClicadaNormalizada) {
             mapa[cod]._temHoraClicada = true;
             mapa[cod].meta = Math.max(
                 Number(mapa[cod].meta || 0),
-                (ajustarMetaClusterMtami(toNumber(l["Meta Prog."]), supervisor || "", l["Nome"], l[campoGlobal]) / 9) * obterHorasAcumuladas(horaClicada)
+                (ajustarMetaClusterMtami(toNumber(l["Meta Prog."]), supervisor || "", l["Nome"], l[campoGlobal]) / 9) * obterHorasAcumuladas(horaClicadaNormalizada)
             );
             mapa[cod].prod = Math.max(
                 Number(mapa[cod].prod || 0),
@@ -5324,7 +5407,7 @@ function montarListaEquipesSupervisor(supervisor, horaClicada, data, uo, codigos
     });
 
     const lista = Object.values(mapa)
-        .filter(e => !horaClicada || e._temHoraClicada)
+        .filter(e => !horaClicadaNormalizada || e._temHoraClicada)
         .map(e => ({
             ...e,
             percProdDiaCompleto: e.metaDia > 0 ? (e.prodDia / e.metaDia) * 100 : 0,
@@ -5344,6 +5427,71 @@ function montarListaEquipesPorFiltro(nomeLinha, faixaClicada, horaClicada, data,
     if (!faixaClicada) return lista;
 
     return lista.filter(e => String(e.faixaDiaCompleta || "-").toUpperCase() === String(faixaClicada).toUpperCase());
+}
+
+async function carregarMapaLoteProdTabelaGeral(data) {
+    const dataRef = String(data || "").trim();
+    if (!dataRef) return new Map();
+    if (cacheLoteProdEquipesTabelaGeral.has(dataRef)) {
+        return cacheLoteProdEquipesTabelaGeral.get(dataRef);
+    }
+
+    const params = new URLSearchParams();
+    params.set("dataInicio", dataRef);
+    params.set("dataFim", dataRef);
+
+    try {
+        const resp = await fetch(`/api/lote-prod/equipes?${params.toString()}`, { cache: "no-store" });
+        if (!resp.ok) throw new Error(`Erro ao carregar lote (${resp.status}).`);
+
+        const payload = await resp.json();
+        const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+        const mapa = new Map();
+
+        rows.forEach((row) => {
+            const codigo = String(row?.COD_EQUIPE ?? row?.cod_equipe ?? "").trim();
+            if (!codigo) return;
+
+            const atual = mapa.get(codigo) || { prod: 0, meta: 0 };
+            atual.prod += toNumber(row?.VALOR_US ?? row?.valor_us ?? 0);
+            atual.meta += toNumber(row?.META ?? row?.meta ?? 0);
+            mapa.set(codigo, atual);
+        });
+
+        cacheLoteProdEquipesTabelaGeral.set(dataRef, mapa);
+        return mapa;
+    } catch (error) {
+        console.error("Erro ao carregar lote produtivo da Tabela Geral:", error);
+        const mapa = new Map();
+        cacheLoteProdEquipesTabelaGeral.set(dataRef, mapa);
+        return mapa;
+    }
+}
+
+function resumirLoteProdPorCodigos(codigos = [], mapaLote = new Map()) {
+    let prod = 0;
+    let meta = 0;
+    let temLote = false;
+
+    codigos.forEach((codigo) => {
+        const item = mapaLote.get(String(codigo || "").trim());
+        if (!item) return;
+        temLote = true;
+        prod += toNumber(item.prod);
+        meta += toNumber(item.meta);
+    });
+
+    return {
+        temLote,
+        prod,
+        meta,
+        perc: temLote && meta > 0 ? (prod / meta) * 100 : 0,
+        faixa: temLote && meta > 0 ? classificar((prod / meta) * 100) : "-"
+    };
+}
+
+function formatarProdLoteTabelaGeral(valor) {
+    return fmt3(toNumber(valor) / 1000);
 }
 
 function renderBotaoAcordoLinha(equipe, podeMarcar, ctx) {
@@ -5366,7 +5514,7 @@ function renderBotaoAcordoLinha(equipe, podeMarcar, ctx) {
 }
 
 function modalUsaJustificativa() {
-    return String(currentModalContext?.horaClicada || "") === "13";
+    return horaEhMomentoAcordo(currentModalContext?.horaClicada, currentModalContext?.data);
 }
 
 function obterJustificativaEquipeNoContexto(codigo, ctx) {
@@ -5409,10 +5557,13 @@ function renderCabecalhoModalCompleto(
     mostrarColunaAcordo = false,
     horasVisiveis = FAIXAS,
     mostrarJustificativa = false,
-    mostrarPrevisao13 = false
+    mostrarPrevisao13 = false,
+    horaFechamentoPrevisao = ""
 ) {
     const tr = document.querySelector("#modalEquipes thead tr");
     if (!tr) return;
+    modalEquipesOrdenacao = { coluna: null, direcao: "desc" };
+    const sufixoPrevisao = horaFechamentoPrevisao ? `<br>${escapeHtml(horaFechamentoPrevisao)}h` : "";
 
     tr.innerHTML = `
     ${mostrarColunaAcordo ? `<th class="col-acordo">Acordo</th>` : ""}
@@ -5424,9 +5575,9 @@ function renderCabecalhoModalCompleto(
         ${mostrarFaixaDia ? "<th>Faixa Dia</th>" : ""}
         <th>% PROD.DIA</th>
         ${mostrarPrevisao13 ? `
-            <th>Previsão<br>Prod.</th>
-            <th>Previsão<br>% Meta</th>
-            <th>Previsão<br>Faixa Dia -</th>
+            <th>Previsão${sufixoPrevisao}<br>Prod.</th>
+            <th>Previsão${sufixoPrevisao}<br>% Meta</th>
+            <th>Previsão${sufixoPrevisao}<br>Faixa Dia</th>
         ` : ""}
         ${horasVisiveis.map(hora => `<th>${hora}h</th>`).join("")}
         <th>Serv.</th>
@@ -5827,7 +5978,15 @@ async function aplicarTabelaGeral() {
         return;
     }
 
-    montarCabecalhoGeral(tipo);
+    const mapaLoteProd = await carregarMapaLoteProdTabelaGeral(data);
+    const codigosTabelaGeral = new Set(
+        obterLinhasPorDataUo(data, uo)
+            .map(obterCodigoEquipeLinha)
+            .filter(Boolean)
+    );
+    const usarLoteTabelaGeral = [...codigosTabelaGeral].some((codigo) => mapaLoteProd.has(String(codigo)));
+
+    montarCabecalhoGeral(tipo, usarLoteTabelaGeral);
 
     let mapaServicosDesignados = {};
     try {
@@ -5842,6 +6001,8 @@ async function aplicarTabelaGeral() {
     let totalMeta = 0;
     let totalProd = 0;
     let totalPrevisaoProd = 0;
+    let totalProdLote = 0;
+    let totalMetaLote = 0;
     const horasFonteIndex = horasFonte.indexOf(faixaAtual);
     const faixaPrevisao = turnoComercialAtivo()
         ? (horasFonte[horasFonteIndex > 0 ? horasFonteIndex - 1 : horasFonteIndex] || faixaAtual)
@@ -5912,6 +6073,10 @@ async function aplicarTabelaGeral() {
             if (!codigo) return;
             item.servicosDesignados = Number(mapaServicosDesignados[codigo] || 0);
         });
+        const resumoLote = resumirLoteProdPorCodigos(
+            listaEquipes.map((item) => item.codigo),
+            mapaLoteProd
+        );
         const totalEqLinha = listaEquipes.length;
         const mediaServicosDesignados = mediaNumerica(listaEquipes.map(item => toNumber(item.servicosDesignados)));
         const mediaServicos = mediaNumerica(listaEquipes.map(item => toNumber(item.servicos)));
@@ -5976,6 +6141,10 @@ async function aplicarTabelaGeral() {
             faixaDia: classificar(v.metaDia > 0 ? (v.prodDia / v.metaDia) * 100 : 0),
             previsaoProd,
             previsaoPercMeta,
+            prodLote: resumoLote.prod,
+            metaLote: resumoLote.meta,
+            percLote: resumoLote.perc,
+            faixaLote: resumoLote.faixa,
             totalServicosDesignados,
             totalServicosExecutados,
             totalServicosProdutivos,
@@ -6006,6 +6175,8 @@ async function aplicarTabelaGeral() {
         totalMeta += item.metaDia;
         totalProd += item.prodDia;
         totalPrevisaoProd += item.previsaoProd;
+        totalProdLote += item.prodLote;
+        totalMetaLote += item.metaLote;
         const nomeEsc = escapeJsString(item.nome);
         currentTabelaGeralResumo.porSupervisor[item.nome] = {
             nome: item.nome,
@@ -6025,9 +6196,15 @@ async function aplicarTabelaGeral() {
             <td>${fmt3(item.prodDia)}</td>
             <td class="faixa-${item.faixaDia}">${item.faixaDia}</td>
             <td>${item.metaDia > 0 ? `${item.percProdDia.toFixed(2)}%` : "-"}</td>
-            <td>${fmt3(item.previsaoProd)}</td>
-            <td>${item.metaDia > 0 ? `${item.previsaoPercMeta.toFixed(2)}%` : "-"}</td>
-            <td class="faixa-${item.metaDia > 0 ? classificar(item.previsaoPercMeta) : "-"}">${item.metaDia > 0 ? classificar(item.previsaoPercMeta) : "-"}</td>
+            ${usarLoteTabelaGeral ? `
+                <td>${formatarProdLoteTabelaGeral(item.prodLote)}</td>
+                <td>${item.metaLote > 0 ? `${item.percLote.toFixed(2)}%` : "-"}</td>
+                <td class="faixa-${item.faixaLote}">${item.faixaLote}</td>
+            ` : `
+                <td>${fmt3(item.previsaoProd)}</td>
+                <td>${item.metaDia > 0 ? `${item.previsaoPercMeta.toFixed(2)}%` : "-"}</td>
+                <td class="faixa-${item.metaDia > 0 ? classificar(item.previsaoPercMeta) : "-"}">${item.metaDia > 0 ? classificar(item.previsaoPercMeta) : "-"}</td>
+            `}
 
             <td class="link"
                 onclick="abrirModalEquipes('${nomeEsc}', null, '${faixaAtual}')">
@@ -6121,9 +6298,15 @@ async function aplicarTabelaGeral() {
         <td>${fmt3(totalProd)}</td>
         <td class="faixa-${classificar(totalMeta > 0 ? (totalProd / totalMeta) * 100 : 0)}">${classificar(totalMeta > 0 ? (totalProd / totalMeta) * 100 : 0)}</td>
         <td>${totalMeta > 0 ? `${((totalProd / totalMeta) * 100).toFixed(2)}%` : "-"}</td>
-        <td>${fmt3(totalPrevisaoProd)}</td>
-        <td>${totalMeta > 0 ? `${((totalPrevisaoProd / totalMeta) * 100).toFixed(2)}%` : "-"}</td>
-        <td class="faixa-${totalMeta > 0 ? classificar((totalPrevisaoProd / totalMeta) * 100) : "-"}">${totalMeta > 0 ? classificar((totalPrevisaoProd / totalMeta) * 100) : "-"}</td>
+        ${usarLoteTabelaGeral ? `
+            <td>${formatarProdLoteTabelaGeral(totalProdLote)}</td>
+            <td>${totalMetaLote > 0 ? `${((totalProdLote / totalMetaLote) * 100).toFixed(2)}%` : "-"}</td>
+            <td class="faixa-${totalMetaLote > 0 ? classificar((totalProdLote / totalMetaLote) * 100) : "-"}">${totalMetaLote > 0 ? classificar((totalProdLote / totalMetaLote) * 100) : "-"}</td>
+        ` : `
+            <td>${fmt3(totalPrevisaoProd)}</td>
+            <td>${totalMeta > 0 ? `${((totalPrevisaoProd / totalMeta) * 100).toFixed(2)}%` : "-"}</td>
+            <td class="faixa-${totalMeta > 0 ? classificar((totalPrevisaoProd / totalMeta) * 100) : "-"}">${totalMeta > 0 ? classificar((totalPrevisaoProd / totalMeta) * 100) : "-"}</td>
+        `}
 
         <td class="link"
             onclick="abrirModalEquipes(null, null, '${faixaAtual}')">
@@ -7010,24 +7193,30 @@ async function abrirModalEquipes(nomeLinha, faixaClicada, horaClicada) {
 
     filtrosModal = {};
 
+    const data = dataSelect.value;
+    const uo = uoSelect.value;
     const mostrarFaixaDia = true;
     const mostrarColunaAcordo = !!nomeLinha;
-    const mostrarJustificativa = String(horaClicada) === "13";
-    const mostrarPrevisao13 = String(horaClicada) === "13";
+    const mostrarJustificativa = horaEhMomentoAcordo(horaClicada, data);
+    const mostrarPrevisao13 = mostrarJustificativa;
 
     const horasTabela = obterHorariosModalEquipes();
     const idxHora = horasTabela.indexOf(normalizarHora(horaClicada));
     const horasVisiveis = idxHora >= 0 ? horasTabela.slice(0, idxHora + 1) : horasTabela;
 
-    renderCabecalhoModalCompleto(mostrarFaixaDia, mostrarColunaAcordo, horasVisiveis, mostrarJustificativa, mostrarPrevisao13);
+    renderCabecalhoModalCompleto(
+        mostrarFaixaDia,
+        mostrarColunaAcordo,
+        horasVisiveis,
+        mostrarJustificativa,
+        mostrarPrevisao13,
+        obterHoraFechamentoAcordoDia(data)
+    );
     garantirColunaInicioJornada(document.querySelector("#modalEquipes thead tr"));
 
     const modal = document.getElementById("modalEquipes");
     const body = document.getElementById("modalBody");
     const titulo = document.getElementById("modalTitulo");
-
-    const data = dataSelect.value;
-    const uo = uoSelect.value;
 
     const faixaTxt = faixaClicada ? `Faixa ${faixaClicada}` : "Todas as faixas";
     const cabTipo = rotuloTipoAtual();
@@ -7072,7 +7261,7 @@ async function abrirModalEquipes(nomeLinha, faixaClicada, horaClicada) {
         const classeStatus = obterClasseStatusJornada(status);
 
         const linhaMarcada = mostrarColunaAcordo && estaEquipeMarcadaNoContexto(e.codigo, currentModalContext);
-        const previsaoProd = mostrarPrevisao13 ? calcularPrevisaoNotaFinal(e.prod) : 0;
+        const previsaoProd = mostrarPrevisao13 ? calcularPrevisaoAcordo(e.prod, horaClicada, data) : 0;
         const previsaoMeta = mostrarPrevisao13 ? Number(e.metaDia || 0) : 0;
         const previsaoPerc = mostrarPrevisao13 && previsaoMeta > 0 ? (previsaoProd / previsaoMeta) * 100 : 0;
         const previsaoPercTxt = mostrarPrevisao13 ? (previsaoMeta > 0 ? `${previsaoPerc.toFixed(2)}%` : "-") : "-";
@@ -7150,19 +7339,28 @@ async function abrirModalFaixa(supervisor, horaClicada) {
 
     await prepararDadosModalTurno();
 
+    const data = dataSelect.value;
+    const uo = uoSelect.value;
     const horasTabela = obterHorariosModalEquipes();
     const horaRef = obterHoraReferenciaModalEquipes(horaClicada);
     const indexFinal = horasTabela.indexOf(horaRef);
     const horasVisiveis = turnoTardeAtivo()
         ? horasTabela
         : (indexFinal >= 0 ? horasTabela.slice(0, indexFinal + 1) : horasTabela);
-    const mostrarJustificativa = String(horaRef) === "13";
-    const mostrarPrevisao13 = String(horaRef) === "13";
+    const mostrarJustificativa = horaEhMomentoAcordo(horaRef, data);
+    const mostrarPrevisao13 = mostrarJustificativa;
     horaClicada = horaRef;
 
     filtrosModal = {};
     currentModalKpiFilter = "todas";
-    renderCabecalhoModalCompleto(true, true, horasVisiveis, mostrarJustificativa, mostrarPrevisao13);
+    renderCabecalhoModalCompleto(
+        true,
+        true,
+        horasVisiveis,
+        mostrarJustificativa,
+        mostrarPrevisao13,
+        obterHoraFechamentoAcordoDia(data)
+    );
     garantirColunaInicioJornada(document.querySelector("#modalEquipes thead tr"));
 
     const modal = document.getElementById("modalEquipes");
@@ -7175,8 +7373,8 @@ async function abrirModalFaixa(supervisor, horaClicada) {
     const lista = montarListaEquipesSupervisor(
         supervisor,
         horaClicada,
-        dataSelect.value,
-        uoSelect.value
+        data,
+        uo
     );
     const metaFixaModal = lista.reduce((acc, item) => acc + Number(item.metaDia || item.meta || 0), 0);
     const prodFixaModal = lista.reduce((acc, item) => acc + Number(item.prodDia || item.prod || 0), 0);
@@ -7186,8 +7384,8 @@ async function abrirModalFaixa(supervisor, horaClicada) {
         supervisor,
         horaClicada,
         faixaClicada: "",
-        data: dataSelect.value,
-        uo: uoSelect.value,
+        data,
+        uo,
         tipoVisao: tipoSelect.value,
         listaAtual: lista,
         kpisFixos: {
@@ -7208,7 +7406,7 @@ async function abrirModalFaixa(supervisor, horaClicada) {
         const status = String(e.statusJornada || "").toUpperCase();
         const classeStatus = obterClasseStatusJornada(status);
         const linhaMarcada = estaEquipeMarcadaNoContexto(e.codigo, currentModalContext);
-        const previsaoProd = mostrarPrevisao13 ? calcularPrevisaoNotaFinal(e.prod) : 0;
+        const previsaoProd = mostrarPrevisao13 ? calcularPrevisaoAcordo(e.prod, horaClicada, data) : 0;
         const previsaoMeta = mostrarPrevisao13 ? Number(e.metaDia || 0) : 0;
         const previsaoPerc = mostrarPrevisao13 && previsaoMeta > 0 ? (previsaoProd / previsaoMeta) * 100 : 0;
         const previsaoPercTxt = mostrarPrevisao13 ? (previsaoMeta > 0 ? `${previsaoPerc.toFixed(2)}%` : "-") : "-";
@@ -7269,8 +7467,9 @@ function abrirModalAcordos() {
     if (historicoAcordosFiltros) historicoAcordosFiltros.classList.add("hidden");
 
     const horaReferencia = currentModalContext.horaClicada || "17";
-    const rotulosAcordo = obterRotulosPainelAcordos(horaReferencia);
-    renderizarCabecalhoContextoAcordos(horaReferencia);
+    const dataReferencia = currentModalContext.data || dataSelect?.value || "";
+    const rotulosAcordo = obterRotulosPainelAcordos(horaReferencia, dataReferencia);
+    renderizarCabecalhoContextoAcordos(horaReferencia, dataReferencia);
 
     const registros = obterRegistrosAcordoContexto(currentModalContext);
     const acordosMapa = obterMapaAcordosPainel(currentModalContext);
@@ -7295,7 +7494,7 @@ function abrirModalAcordos() {
         .map(a => {
             const atual = mapaAtual[String(a.codigo)];
             const faixaDia = atual?.faixaDiaCompleta || atual?.faixaDia || "-";
-            const statusAcordo = montarStatusAcordoFaixa(faixaDia, horaReferencia);
+            const statusAcordo = montarStatusAcordoFaixa(faixaDia, horaReferencia, dataReferencia);
 
             return {
                 acordo: a,
@@ -7344,6 +7543,7 @@ function abrirModalAcordos() {
     atualizarMetaModalAcordos();
 
     garantirColunaInicioJornada(document.querySelector("#modalAcordos thead tr"));
+    const horasAcordo = obterHorasPainelAcordos(dataReferencia);
 
     modalAcordosBody.innerHTML = linhas.length ? linhas.map(l => {
         const acordo = l.acordo;
@@ -7373,11 +7573,7 @@ function abrirModalAcordos() {
             <td class="faixa-${resultadoAcordo.faixa}">${resultadoAcordo.faixa}</td>
             <td>${Number(resultadoAcordo.perc || 0).toFixed(2)}%</td>
 
-            <td class="faixa-${atual.faixas["09"] || "-"}">${atual.faixas["09"] || "-"}</td>
-            <td class="faixa-${atual.faixas["11"] || "-"}">${atual.faixas["11"] || "-"}</td>
-            <td class="faixa-${atual.faixas["13"] || "-"}">${atual.faixas["13"] || "-"}</td>
-            <td class="faixa-${atual.faixas["15"] || "-"}">${atual.faixas["15"] || "-"}</td>
-            <td class="faixa-${atual.faixas["17"] || "-"}">${atual.faixas["17"] || "-"}</td>
+            ${horasAcordo.map(hora => `<td class="faixa-${atual.faixas[hora] || "-"}">${atual.faixas[hora] || "-"}</td>`).join("")}
 
             <td>${atual.servicos}</td>
             <td>${atual.produtivo}</td>
@@ -7507,12 +7703,13 @@ function obterListaMomento13ParaAcordosRs(ctx) {
     const data = String(ctx.data || dataSelect?.value || "").trim();
     const uo = String(ctx.uo || uoSelect?.value || "").trim();
     const supervisor = String(ctx.supervisor || "").trim() || null;
+    const horaAcordo = obterHoraAcordoDia(data);
 
     if (ctx.tipoModal === "equipes") {
-        return montarListaEquipesPorFiltro(supervisor, ctx.faixaClicada || "", "13", data, uo);
+        return montarListaEquipesPorFiltro(supervisor, ctx.faixaClicada || "", horaAcordo, data, uo);
     }
 
-    return montarListaEquipesSupervisor(supervisor, "13", data, uo, null);
+    return montarListaEquipesSupervisor(supervisor, horaAcordo, data, uo, null);
 }
 
 function abrirModalAcordosRs() {
@@ -7527,16 +7724,18 @@ function abrirModalAcordosRs() {
         return;
     }
     const uoCtx = String(currentModalContext?.uo || uoSelect?.value || "").trim();
+    const horaAcordo = obterHoraAcordoDia(dataCtx);
+    const horaFechamentoAcordo = obterHoraFechamentoAcordoDia(dataCtx);
 
     let ctx = currentModalContext;
     if (!ctx) {
-        const listaBase = montarListaEquipesSupervisor(null, "13", dataCtx, uoCtx, null);
+        const listaBase = montarListaEquipesSupervisor(null, horaAcordo, dataCtx, uoCtx, null);
         const metaFixa = listaBase.reduce((acc, item) => acc + Number(item.metaDia || 0), 0);
         const prodFixa = listaBase.reduce((acc, item) => acc + Number(item.prodDia || 0), 0);
         ctx = {
             tipoModal: "menu-rs",
             supervisor: "",
-            horaClicada: "13",
+            horaClicada: horaAcordo,
             faixaClicada: "",
             data: dataCtx,
             uo: uoCtx,
@@ -7554,10 +7753,17 @@ function abrirModalAcordosRs() {
     const supervisorCtx = String(ctx.supervisor || "").trim() || null;
 
     const linhasContexto = obterLinhasContextoModal(dataCtx, uoCtx);
-    const temFechamento17 = linhasContexto.some(l => obterHoraLinha(l) === "17");
-    const horaFech = temFechamento17 ? "17" : (ultimaFaixaDisponivel(uoCtx, dataCtx) || "17");
+    const horaFechamentoNumAlvo = Number(horaFechamentoAcordo);
+    const horasFechamentoDisponiveis = [...new Set(linhasContexto
+        .map(l => obterHoraLinha(l))
+        .filter(h => {
+            const n = Number(h);
+            return h && Number.isFinite(n) && n <= horaFechamentoNumAlvo;
+        }))]
+        .sort((a, b) => Number(b) - Number(a));
+    const horaFech = horasFechamentoDisponiveis[0] || horaFechamentoAcordo;
 
-    // "Situação momento do acordo" sempre usa os dados de 13h
+    // "Situação momento do acordo" usa 11h nas sextas e 13h nos demais dias.
     const listaBase = obterListaMomento13ParaAcordosRs(ctx);
     const codigosPermitidos = new Set(listaBase.map(e => String(e.codigo || "").trim()).filter(Boolean));
     const horaFechNum = Number(normalizarHora(horaFech));
@@ -7596,7 +7802,7 @@ function abrirModalAcordosRs() {
         const momentoPerc = metaDia > 0 ? (prodMomento / metaDia) * 100 : 0;
         const momentoFaixa = metaDia > 0 ? classificar(momentoPerc) : "-";
 
-        const previsaoProd = calcularPrevisaoNotaFinal(prodMomento);
+        const previsaoProd = calcularPrevisaoAcordo(prodMomento, horaAcordo, dataCtx);
         const previsaoPerc = metaDia > 0 ? (previsaoProd / metaDia) * 100 : 0;
         const previsaoFaixa = metaDia > 0 ? classificar(previsaoPerc) : "-";
 
@@ -7644,7 +7850,7 @@ function abrirModalAcordosRs() {
             ? `${rotuloTipoAtual().toUpperCase()} ${ctx.supervisor}`
             : "TOTAL EQUIPES";
         const dataTxt = formatarDataBR(ctx.data || "");
-        modalAcordosRsTitulo.innerText = `R$ ACORDOS - ${escopoTitulo} - ${dataTxt} - Momento 13h - Fechamento ${horaFech}h`;
+        modalAcordosRsTitulo.innerText = `R$ ACORDOS - ${escopoTitulo} - ${dataTxt} - Momento ${horaAcordo}h - Fechamento ${horaFech}h`;
     }
 
     currentAcordosRsBaseLinhas = linhas;
@@ -8540,6 +8746,160 @@ function aplicarFiltrosCombinados() {
 
 /* ================= FILTROS DO MODAL ================= */
 
+let modalEquipesOrdenacao = { coluna: null, direcao: "desc" };
+
+function textoCabecalhoModal(th) {
+    const clone = th.cloneNode(true);
+    clone.querySelectorAll(".filter-pro, .sort-indicator").forEach(el => el.remove());
+    return clone.innerText.trim().replace(/\s+/g, " ");
+}
+
+function normalizarValorOrdenacaoModal(valor) {
+    const texto = String(valor || "").trim();
+    if (!texto || texto === "-") return { tipo: "vazio", valor: "" };
+
+    const faixa = texto.toUpperCase();
+    const ordemFaixa = { AA: 5, A: 4, B: 3, C: 2, D: 1 };
+    if (Object.prototype.hasOwnProperty.call(ordemFaixa, faixa)) {
+        return { tipo: "numero", valor: ordemFaixa[faixa] };
+    }
+
+    if (/^\d{1,2}:\d{2}$/.test(texto)) {
+        const [h, m] = texto.split(":").map(Number);
+        return { tipo: "numero", valor: h * 60 + m };
+    }
+
+    const numero = Number(
+        texto
+            .replace(/%/g, "")
+            .replace(/\./g, "")
+            .replace(",", ".")
+            .replace(/[^\d.-]/g, "")
+    );
+
+    if (Number.isFinite(numero) && /[\d]/.test(texto)) {
+        return { tipo: "numero", valor: numero };
+    }
+
+    return {
+        tipo: "texto",
+        valor: texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase()
+    };
+}
+
+function compararValorOrdenacaoModal(a, b, direcao) {
+    const va = normalizarValorOrdenacaoModal(a);
+    const vb = normalizarValorOrdenacaoModal(b);
+
+    if (va.tipo === "vazio" && vb.tipo !== "vazio") return 1;
+    if (vb.tipo === "vazio" && va.tipo !== "vazio") return -1;
+    if (va.tipo === "vazio" && vb.tipo === "vazio") return 0;
+
+    let resultado = 0;
+    if (va.tipo === "numero" && vb.tipo === "numero") {
+        resultado = va.valor - vb.valor;
+    } else {
+        resultado = String(va.valor).localeCompare(String(vb.valor), "pt-BR", {
+            numeric: true,
+            sensitivity: "base"
+        });
+    }
+
+    return direcao === "asc" ? resultado : -resultado;
+}
+
+function atualizarIndicadoresOrdenacaoModal() {
+    document.querySelectorAll("#modalEquipes thead th").forEach((th, index) => {
+        const indicador = th.querySelector(".sort-indicator");
+        if (!indicador) return;
+        const ativo = modalEquipesOrdenacao.coluna === index;
+        th.classList.toggle("sort-active", ativo);
+        indicador.textContent = ativo
+            ? (modalEquipesOrdenacao.direcao === "asc" ? "↑" : "↓")
+            : "↕";
+    });
+}
+
+function ordenarModalEquipesPorColuna(coluna) {
+    const body = document.getElementById("modalBody");
+    if (!body) return;
+
+    const direcao =
+        modalEquipesOrdenacao.coluna === coluna && modalEquipesOrdenacao.direcao === "desc"
+            ? "asc"
+            : "desc";
+
+    modalEquipesOrdenacao = { coluna, direcao };
+
+    const linhas = [...body.querySelectorAll("tr")]
+        .filter(linha => linha.children.length > 1);
+
+    linhas.sort((a, b) => {
+        const valorA = a.children[coluna]?.innerText || "";
+        const valorB = b.children[coluna]?.innerText || "";
+        const cmp = compararValorOrdenacaoModal(valorA, valorB, direcao);
+        if (cmp !== 0) return cmp;
+        return String(a.dataset.codigo || "").localeCompare(String(b.dataset.codigo || ""), "pt-BR", { numeric: true });
+    });
+
+    linhas.forEach(linha => body.appendChild(linha));
+    atualizarIndicadoresOrdenacaoModal();
+}
+
+function aplicarOrdenacaoModalEquipesAtual() {
+    const body = document.getElementById("modalBody");
+    if (!body || modalEquipesOrdenacao.coluna == null) return;
+
+    const coluna = Number(modalEquipesOrdenacao.coluna);
+    const direcao = modalEquipesOrdenacao.direcao || "desc";
+    const linhas = [...body.querySelectorAll("tr")]
+        .filter(linha => linha.children.length > 1);
+
+    linhas.sort((a, b) => {
+        const valorA = a.children[coluna]?.innerText || "";
+        const valorB = b.children[coluna]?.innerText || "";
+        const cmp = compararValorOrdenacaoModal(valorA, valorB, direcao);
+        if (cmp !== 0) return cmp;
+        return String(a.dataset.codigo || "").localeCompare(String(b.dataset.codigo || ""), "pt-BR", { numeric: true });
+    });
+
+    linhas.forEach(linha => body.appendChild(linha));
+    atualizarIndicadoresOrdenacaoModal();
+}
+
+function restaurarOrdenacaoModalAposRender(ordenacaoAnterior) {
+    if (!ordenacaoAnterior || ordenacaoAnterior.coluna == null) return;
+    setTimeout(() => {
+        modalEquipesOrdenacao = { ...ordenacaoAnterior };
+        aplicarOrdenacaoModalEquipesAtual();
+        aplicarFiltrosModal();
+    }, 90);
+}
+
+function configurarOrdenacaoModalEquipes() {
+    const ths = document.querySelectorAll("#modalEquipes thead th");
+    ths.forEach((th, colIndex) => {
+        if (th.dataset.sortBound === "1") return;
+
+        th.dataset.sortBound = "1";
+        th.classList.add("sortable-th");
+        th.title = "Clique para ordenar";
+
+        if (!th.querySelector(".sort-indicator")) {
+            const indicador = document.createElement("span");
+            indicador.className = "sort-indicator";
+            indicador.setAttribute("aria-hidden", "true");
+            indicador.textContent = "↕";
+            th.appendChild(document.createTextNode(" "));
+            th.appendChild(indicador);
+        }
+
+        th.addEventListener("click", () => ordenarModalEquipesPorColuna(colIndex));
+    });
+
+    atualizarIndicadoresOrdenacaoModal();
+}
+
 function adicionarFiltrosModal() {
     const colunasPermitidas = [
         "Cód. Eq.",
@@ -8557,7 +8917,7 @@ function adicionarFiltrosModal() {
     const ths = document.querySelectorAll("#modalEquipes thead th");
 
     ths.forEach((th, colIndex) => {
-        const titulo = th.innerText.trim();
+        const titulo = textoCabecalhoModal(th);
         if (!colunasPermitidas.includes(titulo)) return;
         if (th.querySelector(".filter-pro")) return;
 
@@ -8575,6 +8935,8 @@ function adicionarFiltrosModal() {
             abrirFiltroProfissional(th, colIndex, icon);
         });
     });
+
+    configurarOrdenacaoModalEquipes();
 }
 
 function abrirFiltroProfissional(th, colIndex, icon) {
@@ -9478,3 +9840,4 @@ setTimeout(() => {
 }, 0);
 carregarStatusDados();
 setInterval(carregarStatusDados, 5 * 60 * 1000);
+setInterval(atualizarTabelaGeralComDadosDoBanco, INTERVALO_ATUALIZACAO_TABELA_GERAL_MS);

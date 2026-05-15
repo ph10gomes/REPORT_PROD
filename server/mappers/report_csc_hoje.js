@@ -75,15 +75,6 @@ function normalizeSpaces(value) {
 function mapHoraAtualizacaoToFaixa(value) {
   const n = Number(String(value ?? "").trim());
   if (!Number.isFinite(n)) return "";
-  // Regra do painel (faixas 09/11/13/15/17) conforme combinado:
-  // 07:00–09:00  -> 09
-  // 09:01–11:00  -> 11
-  // 11:01–13:00  -> 13
-  // 13:01–15:00  -> 15
-  // 15:01–17:00+ -> 17
-  //
-  // Como `hora_atualizacao` é inteiro (hora), aplicamos:
-  // 7–9 -> 09, 10–11 -> 11, 12–13 -> 13, 14–15 -> 15, 16+ -> 17.
   if (n < 7) return "";
   if (n <= 9) return "09";
   if (n <= 11) return "11";

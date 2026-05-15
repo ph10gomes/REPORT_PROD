@@ -1100,6 +1100,165 @@ function numeroOuZero(value) {
   return numeroOuNulo(value) ?? 0;
 }
 
+function removerRodapeTabela() {
+  document.querySelector("#tabelaRelatorio tfoot")?.remove();
+}
+
+function modaTexto(lista, campo) {
+  const contagem = new Map();
+  lista.forEach((row) => {
+    const valor = normalizarValorFiltro(row[campo]);
+    if (!valor || valor === "-") return;
+    contagem.set(valor, (contagem.get(valor) || 0) + 1);
+  });
+
+  let melhor = "";
+  let maior = 0;
+  contagem.forEach((qtd, valor) => {
+    if (qtd > maior) {
+      maior = qtd;
+      melhor = valor;
+    }
+  });
+  return melhor || "-";
+}
+
+function mediaHoraCampo(lista, campo) {
+  const valores = lista
+    .map(row => hhmmToMin(row[campo]))
+    .filter(Number.isFinite);
+  return minParaHoraMedia(valores) || "-";
+}
+
+function clusterPredominante(lista) {
+  const contagem = new Map();
+  lista.forEach((row) => {
+    const cluster = String(row.CLUSTER || extrairCluster(row.NOME_EQUIPE) || "").trim();
+    if (!cluster) return;
+    contagem.set(cluster, (contagem.get(cluster) || 0) + 1);
+  });
+
+  let melhor = "";
+  let maior = 0;
+  contagem.forEach((qtd, cluster) => {
+    if (qtd > maior) {
+      maior = qtd;
+      melhor = cluster;
+    }
+  });
+  return melhor;
+}
+
+function obterReferenciaAtualizacaoLista(lista) {
+  let melhor = null;
+
+  lista.forEach((row) => {
+    const dataDia = row.DATA_DIA || somenteData(row.atualizado_em) || obterDataFiltroAtiva();
+    const horaAtualizacao = horaReferenciaBanco(row);
+    if (!dataDia || !horaAtualizacao) return;
+
+    const timestamp = Date.parse(`${dataDia}T${horaAtualizacao}:00`);
+    if (!Number.isFinite(timestamp)) return;
+    if (!melhor || timestamp > melhor.timestamp) {
+      melhor = {
+        timestamp,
+        dataDia,
+        atualizadoEm: `${dataDia}T${horaAtualizacao}:00`
+      };
+    }
+  });
+
+  return melhor || {
+    dataDia: obterDataFiltroAtiva(),
+    atualizadoEm: ""
+  };
+}
+
+function horaReferenciaBanco(row) {
+  const horaTurno = String(row.HORA_TURNO ?? "").trim();
+  if (/^\d{1,2}$/.test(horaTurno)) return `${horaTurno.padStart(2, "0")}:00`;
+  if (/^\d{1,2}:\d{2}$/.test(horaTurno)) return hora(horaTurno);
+
+  const horaBanco = String(row.HORA ?? "").trim();
+  if (/^\d{1,2}$/.test(horaBanco)) return `${horaBanco.padStart(2, "0")}:00`;
+  if (/^\d{3,4}$/.test(horaBanco)) {
+    const texto = horaBanco.padStart(4, "0");
+    return `${texto.slice(0, 2)}:${texto.slice(2)}`;
+  }
+  if (horaBanco) {
+    const horaNormalizada = hora(horaBanco);
+    if (horaNormalizada) return horaNormalizada;
+  }
+
+  return hora(row.atualizado_em);
+}
+
+function calcularResumoRodapeTabela(lista) {
+  const cluster = clusterPredominante(lista);
+  const mediaJornadaProd = mediaHoraCampo(lista, "JORNADA_PROD");
+  const referenciaAtualizacao = obterReferenciaAtualizacaoLista(lista);
+  const registroMedio = {
+    NOME_EQUIPE: cluster ? `BH-${cluster}-MEDIA` : "",
+    DATA_DIA: referenciaAtualizacao.dataDia,
+    atualizado_em: referenciaAtualizacao.atualizadoEm,
+    INICIO_JORNADA: mediaHoraCampo(lista, "INICIO_JORNADA").replace("-", ""),
+    PRIMEIRO_ATENDIMENTO: mediaHoraCampo(lista, "PRIMEIRO_ATENDIMENTO").replace("-", ""),
+    INICIO_REFEICAO: mediaHoraCampo(lista, "INICIO_REFEICAO").replace("-", ""),
+    TERMINO_REFEICAO: mediaHoraCampo(lista, "TERMINO_REFEICAO").replace("-", ""),
+    ULTIMO_ATENDIMENTO: mediaHoraCampo(lista, "ULTIMO_ATENDIMENTO").replace("-", ""),
+    FIM_JORNADA: mediaHoraCampo(lista, "FIM_JORNADA").replace("-", "")
+  };
+  const status = calcularStatusPorMeta(registroMedio);
+
+  return {
+    COD_EQUIPE: "TOTAL / MEDIA",
+    NOME_EQUIPE: `${lista.length} equipes`,
+    INICIO_JORNADA: registroMedio.INICIO_JORNADA || "-",
+    STATUS_INICIO: status.STATUS_INICIO || "-",
+    PRIMEIRO_ATENDIMENTO: registroMedio.PRIMEIRO_ATENDIMENTO || "-",
+    STATUS_PRIMEIRO: status.STATUS_PRIMEIRO || "-",
+    INICIO_REFEICAO: registroMedio.INICIO_REFEICAO || "-",
+    TERMINO_REFEICAO: registroMedio.TERMINO_REFEICAO || "-",
+    STATUS_REFEICAO: status.STATUS_REFEICAO || "-",
+    ULTIMO_ATENDIMENTO: registroMedio.ULTIMO_ATENDIMENTO || "-",
+    STATUS_FINAL: status.STATUS_ULTIMO || "-",
+    JORNADA_PROD: mediaJornadaProd,
+    STATUS_PROD: Number.isFinite(hhmmToMin(mediaJornadaProd))
+      ? (hhmmToMin(mediaJornadaProd) >= 420 ? "COMPLETA" : "INCOMPLETA")
+      : (status.STATUS_PROD || "-"),
+    FIM_JORNADA: registroMedio.FIM_JORNADA || "-",
+    JORNADA: mediaHoraCampo(lista, "JORNADA"),
+    STATUS_JORNADA: status.STATUS_JORNADA || "-"
+  };
+}
+
+function valorRodapeTabela(lista, coluna) {
+  const resumo = calcularResumoRodapeTabela(lista);
+  return resumo[coluna.key] ?? "-";
+}
+
+function renderizarRodapeTabela(lista) {
+  const tabela = document.getElementById("tabelaRelatorio");
+  if (!tabela) return;
+
+  removerRodapeTabela();
+  if (!lista.length) return;
+
+  const tfoot = document.createElement("tfoot");
+  tfoot.className = "tabela-rodape-medias";
+  const resumo = calcularResumoRodapeTabela(lista);
+  tfoot.innerHTML = `
+    <tr>
+      ${COLUNAS_TABELA.map(coluna => {
+        const valor = resumo[coluna.key] ?? "-";
+        const classeStatus = coluna.key.startsWith("STATUS_") ? classe(valor) : "";
+        return `<td class="${classeStatus}">${safe(valor)}</td>`;
+      }).join("")}
+    </tr>
+  `;
+  tabela.appendChild(tfoot);
+}
+
 /* =========================
    TABELA
 ========================= */
@@ -1141,16 +1300,10 @@ function preencherTabela() {
   lista = ordenarListaTabela(lista);
 
   if (!lista.length) {
+    removerRodapeTabela();
     tbody.innerHTML = `<tr><td colspan="16">Nenhum registro</td></tr>`;
     return;
   }
-
-  const totalPaginas = Math.max(1, Math.ceil(lista.length / LINHAS_POR_PAGINA));
-  if (paginaAtual > totalPaginas) paginaAtual = totalPaginas;
-
-  const inicioPagina = (paginaAtual - 1) * LINHAS_POR_PAGINA;
-  const fimPagina = inicioPagina + LINHAS_POR_PAGINA;
-  const listaPagina = lista.slice(inicioPagina, fimPagina);
 
   const modal = document.getElementById("modalDetalhes");
   const modalBody = document.getElementById("modalBody");
@@ -1219,7 +1372,7 @@ function preencherTabela() {
     });
   }
 
-  listaPagina.forEach(l => {
+  lista.forEach(l => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${safe(l.COD_EQUIPE)}</td>
@@ -1256,7 +1409,7 @@ function preencherTabela() {
     tbody.appendChild(tr);
   });
 
-  renderizarPaginacao(totalPaginas);
+  renderizarRodapeTabela(lista);
 }
 
 function aplicarFiltrosColuna(lista) {
@@ -1291,7 +1444,7 @@ function valorOrdenacaoTempo(value) {
   return Number.isFinite(minutos) ? minutos : null;
 }
 
-function abrirModalHistoricoEquipePeriodo(equipeSelecionada, origemEl = null) {
+function abrirModalHistoricoEquipePeriodoLegacy(equipeSelecionada, origemEl = null) {
   const modal = document.getElementById("modalDetalhes");
   const modalBody = document.getElementById("modalBody");
   if (!modal || !modalBody) return;
@@ -1350,6 +1503,121 @@ function abrirModalHistoricoEquipePeriodo(equipeSelecionada, origemEl = null) {
     </div>
   `;
 
+  abrirModalPosicionado(modal, origemEl);
+}
+
+function abrirModalHistoricoEquipePeriodo(equipeSelecionada, origemEl = null) {
+  const modal = document.getElementById("modalDetalhes");
+  const modalBody = document.getElementById("modalBody");
+  if (!modal || !modalBody) return;
+
+  const rows = obterUltimosRegistrosPorDia(
+    aplicarFiltros().filter(row => mesmoRegistroEquipe(row, equipeSelecionada))
+  );
+  const colunasHistorico = [
+    { key: "DATA_DIA", label: "Data", valor: row => formatarDataBr(row.DATA_DIA) },
+    { key: "NOME_EQUIPE", label: "Equipes" },
+    { key: "INICIO_JORNADA", label: "Inicio<br>Jornada" },
+    { key: "STATUS_INICIO", label: "Status<br>Inicio", status: true },
+    { key: "PRIMEIRO_ATENDIMENTO", label: "1o<br>Atend." },
+    { key: "STATUS_PRIMEIRO", label: "Status<br>1o", status: true },
+    { key: "INICIO_REFEICAO", label: "Inicio<br>Refeicao" },
+    { key: "TERMINO_REFEICAO", label: "Termino<br>Refeicao" },
+    { key: "STATUS_REFEICAO", label: "Status<br>Refeicao", status: true },
+    { key: "ULTIMO_ATENDIMENTO", label: "Ultimo<br>Serv." },
+    { key: "STATUS_FINAL", label: "Status<br>Final", status: true },
+    { key: "JORNADA_PROD", label: "Jornada<br>Prod." },
+    { key: "STATUS_PROD", label: "Status<br>Prod.", status: true },
+    { key: "FIM_JORNADA", label: "Fim<br>Jornada" },
+    { key: "JORNADA", label: "Jornada" },
+    { key: "STATUS_JORNADA", label: "Status", status: true }
+  ];
+  const filtrosHistorico = {};
+
+  const valorHistorico = (row, coluna) => normalizarValorFiltro(
+    typeof coluna.valor === "function" ? coluna.valor(row) : row[coluna.key]
+  );
+
+  const aplicarFiltrosHistorico = () => {
+    const ativos = Object.entries(filtrosHistorico).filter(([, valorFiltro]) => valorFiltro);
+    if (!ativos.length) return rows;
+    return rows.filter((row) =>
+      ativos.every(([key, valorFiltro]) => {
+        const coluna = colunasHistorico.find(col => col.key === key);
+        return coluna && valorHistorico(row, coluna) === valorFiltro;
+      })
+    );
+  };
+
+  const renderizarCabecalhoHistorico = () => colunasHistorico.map((coluna) => {
+    const valores = [...new Set(rows.map(row => valorHistorico(row, coluna)).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
+    const atual = filtrosHistorico[coluna.key] || "";
+    return `
+      <th class="th-filtro-modal-jornada${atual ? " filtro-ativo" : ""}" data-coluna-modal="${safeAttr(coluna.key)}">
+        <button class="btn-filtro-modal-jornada" type="button" data-coluna="${safeAttr(coluna.key)}">
+          <span>${coluna.label}</span>
+          <span class="icone-filtro-cabecalho">v</span>
+        </button>
+        <div class="dropdown-filtro-modal-jornada" data-dropdown-modal="${safeAttr(coluna.key)}">
+          <button class="opcao-filtro-modal-jornada${!atual ? " selecionada" : ""}" type="button" data-coluna="${safeAttr(coluna.key)}" data-valor="">Todos</button>
+          ${valores.map(valor => `<button class="opcao-filtro-modal-jornada${valor === atual ? " selecionada" : ""}" type="button" data-coluna="${safeAttr(coluna.key)}" data-valor="${safeAttr(valor)}">${safe(valor)}</button>`).join("")}
+        </div>
+      </th>
+    `;
+  }).join("");
+
+  const renderizarLinhasHistorico = (lista) => {
+    if (!lista.length) return `<tr><td colspan="${colunasHistorico.length}">Nenhum registro encontrado</td></tr>`;
+    return lista.map(row => `
+      <tr>
+        ${colunasHistorico.map(coluna => {
+          const valor = valorHistorico(row, coluna);
+          return `<td class="${coluna.status ? classe(valor) : ""}">${safe(valor)}</td>`;
+        }).join("")}
+      </tr>
+    `).join("");
+  };
+
+  const renderizarTabelaHistorico = () => {
+    const rowsFiltradas = aplicarFiltrosHistorico();
+    modalBody.innerHTML = `
+      <div class="modal-tabela-resumo">${rowsFiltradas.length} de ${rows.length} registros</div>
+      <div class="modal-tabela-wrap">
+        <table class="tabela-historico-equipe">
+          <thead>
+            <tr>${renderizarCabecalhoHistorico()}</tr>
+          </thead>
+          <tbody>${renderizarLinhasHistorico(rowsFiltradas)}</tbody>
+        </table>
+      </div>
+    `;
+
+    modalBody.querySelectorAll(".btn-filtro-modal-jornada").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const key = btn.dataset.coluna || "";
+        const dropdown = modalBody.querySelector(`[data-dropdown-modal="${CSS.escape(key)}"]`);
+        const deveAbrir = dropdown && !dropdown.classList.contains("aberto");
+        modalBody.querySelectorAll(".dropdown-filtro-modal-jornada.aberto").forEach(el => el.classList.remove("aberto"));
+        if (deveAbrir) dropdown.classList.add("aberto");
+      });
+    });
+
+    modalBody.querySelectorAll(".opcao-filtro-modal-jornada").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const key = btn.dataset.coluna;
+        if (!key) return;
+        if (btn.dataset.valor) filtrosHistorico[key] = btn.dataset.valor;
+        else delete filtrosHistorico[key];
+        renderizarTabelaHistorico();
+      });
+    });
+  };
+
+  modal.querySelector("h2").textContent = `Historico da Equipe - ${equipeSelecionada.NOME_EQUIPE || ""}`;
+  renderizarTabelaHistorico();
   abrirModalPosicionado(modal, origemEl);
 }
 

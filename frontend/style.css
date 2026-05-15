@@ -558,6 +558,50 @@ body{
   background:#eef3f7;
 }
 
+#tabelaRelatorio tfoot td{
+  position:sticky;
+  bottom:0;
+  z-index:4;
+  padding:9px 7px;
+  border-right:1px solid #c7d6e5;
+  border-top:2px solid #9eb4cc;
+  background:#dceaf8;
+  color:var(--navy);
+  text-align:center;
+  font-size:10px;
+  font-weight:900;
+  text-transform:uppercase;
+}
+
+#tabelaRelatorio tfoot td:first-child{
+  left:0;
+  z-index:7;
+  background:#cfe1f3;
+}
+
+#tabelaRelatorio tfoot td:nth-child(2){
+  left:78px;
+  z-index:7;
+  background:#cfe1f3;
+  text-align:left;
+}
+
+#tabelaRelatorio tfoot td.status-normal,
+#tabelaRelatorio tfoot td.status-inc,
+#tabelaRelatorio tfoot td.status-divergencia,
+#tabelaRelatorio tfoot td.status-acima,
+#tabelaRelatorio tfoot td.status-incompleta,
+#tabelaRelatorio tfoot td.status-excessivo,
+#tabelaRelatorio tfoot td.status-atrasado,
+#tabelaRelatorio tfoot td.status-nao,
+#tabelaRelatorio tfoot td.status-nao-registrada,
+#tabelaRelatorio tfoot td.status-andamento,
+#tabelaRelatorio tfoot td.status-aguardando,
+#tabelaRelatorio tfoot td.status-sem-encerramento,
+#tabelaRelatorio tfoot td.status-atraso{
+  color:#fff;
+}
+
 #tabelaRelatorio td:first-child{
   position:sticky;
   left:0;
@@ -785,6 +829,89 @@ body{
   font-size:9px;
   text-transform:uppercase;
   border-right:1px solid rgba(255,255,255,0.12);
+}
+
+.modal-tabela-resumo{
+  margin:0 0 8px;
+  color:var(--navy);
+  font-size:11px;
+  font-weight:800;
+  text-transform:uppercase;
+}
+
+.th-filtro-modal-jornada{
+  padding:0 !important;
+  overflow:visible;
+}
+
+.btn-filtro-modal-jornada{
+  width:100%;
+  min-height:38px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  padding:9px 7px;
+  border:0;
+  background:transparent;
+  color:inherit;
+  font:inherit;
+  letter-spacing:inherit;
+  text-transform:inherit;
+  cursor:pointer;
+}
+
+.btn-filtro-modal-jornada:hover{
+  background:rgba(255,255,255,0.08);
+}
+
+.th-filtro-modal-jornada.filtro-ativo .btn-filtro-modal-jornada{
+  background:#1d8a49;
+}
+
+.dropdown-filtro-modal-jornada{
+  display:none;
+  position:absolute;
+  top:100%;
+  left:4px;
+  z-index:60;
+  min-width:180px;
+  max-width:320px;
+  max-height:280px;
+  overflow:auto;
+  padding:6px;
+  border:1px solid #9fb0c2;
+  background:#fff;
+  color:#172d43;
+  box-shadow:0 10px 24px rgba(18,36,54,0.22);
+  text-transform:none;
+  letter-spacing:0;
+}
+
+.dropdown-filtro-modal-jornada.aberto{
+  display:block;
+}
+
+.opcao-filtro-modal-jornada{
+  width:100%;
+  min-height:28px;
+  padding:6px 8px;
+  border:0;
+  background:#fff;
+  color:#172d43;
+  text-align:left;
+  font-size:11px;
+  font-weight:700;
+  cursor:pointer;
+}
+
+.opcao-filtro-modal-jornada:hover{
+  background:#eef3f7;
+}
+
+.opcao-filtro-modal-jornada.selecionada{
+  background:#dff3e8;
+  color:#0f5d2f;
 }
 
 .tabela-historico-equipe td{

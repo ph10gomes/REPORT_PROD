@@ -1353,20 +1353,40 @@ app.get("/api/lote-prod/equipes-d", async (req, res) => {
     const pool = getPool();
     const database = sanitizeTableNameUnicode(process.env.MYSQL_DATABASE_LOTE_PROD || "producao");
     const view = sanitizeTableNameUnicode(process.env.MYSQL_VIEW_LOTE_PROD || "nivel_1_meta");
+    const reportTable = sanitizeTableName(requireEnv("MYSQL_TABLE"));
 
     const [rows] = await pool.query(`
       SELECT
-        DATA,
-        COD_EQUIPE,
-        VALOR_US,
-        META,
-        VALOR_US_MES,
-        META_MES,
-        FAIXA_DIA
-      FROM \`${database}\`.\`${view}\`
-      WHERE DATA IS NOT NULL
-        AND ASCII(UPPER(TRIM(CAST(COALESCE(FAIXA_DIA, '') AS CHAR)))) = 68
-      ORDER BY DATA ASC, COD_EQUIPE ASC
+        lp.DATA,
+        lp.COD_EQUIPE,
+        report.NOME_EQUIPE,
+        report.NOME_SUPERVISOR,
+        lp.VALOR_US,
+        lp.META,
+        lp.VALOR_US_MES,
+        lp.META_MES,
+        lp.FAIXA_DIA
+      FROM \`${database}\`.\`${view}\` lp
+      LEFT JOIN (
+        SELECT
+          TRIM(CAST(COD_EQUIPE AS CHAR)) AS COD_EQUIPE,
+          SUBSTRING_INDEX(
+            GROUP_CONCAT(NULLIF(TRIM(CAST(NOME_EQUIPE AS CHAR)), '') ORDER BY CASE WHEN DATA IS NOT NULL THEN 1 ELSE 0 END DESC, STR_TO_DATE(DATA, '%d/%m/%Y') DESC, id DESC SEPARATOR '\u001F'),
+            '\u001F',
+            1
+          ) AS NOME_EQUIPE,
+          SUBSTRING_INDEX(
+            GROUP_CONCAT(NULLIF(TRIM(CAST(NOME_SUPERVISOR AS CHAR)), '') ORDER BY CASE WHEN DATA IS NOT NULL THEN 1 ELSE 0 END DESC, STR_TO_DATE(DATA, '%d/%m/%Y') DESC, id DESC SEPARATOR '\u001F'),
+            '\u001F',
+            1
+          ) AS NOME_SUPERVISOR
+        FROM \`${reportTable}\`
+        WHERE COD_EQUIPE IS NOT NULL AND TRIM(CAST(COD_EQUIPE AS CHAR)) <> ''
+        GROUP BY TRIM(CAST(COD_EQUIPE AS CHAR))
+      ) report ON report.COD_EQUIPE = TRIM(CAST(lp.COD_EQUIPE AS CHAR))
+      WHERE lp.DATA IS NOT NULL
+        AND ASCII(UPPER(TRIM(CAST(COALESCE(lp.FAIXA_DIA, '') AS CHAR)))) = 68
+      ORDER BY lp.DATA ASC, lp.COD_EQUIPE ASC
     `);
 
     res.json({ database, view, count: rows.length, rows });
@@ -1380,6 +1400,7 @@ app.get("/api/lote-prod/equipes", async (req, res) => {
     const pool = getPool();
     const database = sanitizeTableNameUnicode(process.env.MYSQL_DATABASE_LOTE_PROD || "producao");
     const view = sanitizeTableNameUnicode(process.env.MYSQL_VIEW_LOTE_PROD || "nivel_1_meta");
+    const reportTable = sanitizeTableName(requireEnv("MYSQL_TABLE"));
     const where = ["DATA IS NOT NULL"];
     const params = [];
 
@@ -1402,16 +1423,35 @@ app.get("/api/lote-prod/equipes", async (req, res) => {
 
     const [rows] = await pool.query(`
       SELECT
-        DATA,
-        COD_EQUIPE,
-        VALOR_US,
-        META,
-        VALOR_US_MES,
-        META_MES,
-        FAIXA_DIA
-      FROM \`${database}\`.\`${view}\`
-      WHERE ${where.join(" AND ")}
-      ORDER BY DATA ASC, COD_EQUIPE ASC
+        lp.DATA,
+        lp.COD_EQUIPE,
+        report.NOME_EQUIPE,
+        report.NOME_SUPERVISOR,
+        lp.VALOR_US,
+        lp.META,
+        lp.VALOR_US_MES,
+        lp.META_MES,
+        lp.FAIXA_DIA
+      FROM \`${database}\`.\`${view}\` lp
+      LEFT JOIN (
+        SELECT
+          TRIM(CAST(COD_EQUIPE AS CHAR)) AS COD_EQUIPE,
+          SUBSTRING_INDEX(
+            GROUP_CONCAT(NULLIF(TRIM(CAST(NOME_EQUIPE AS CHAR)), '') ORDER BY CASE WHEN DATA IS NOT NULL THEN 1 ELSE 0 END DESC, STR_TO_DATE(DATA, '%d/%m/%Y') DESC, id DESC SEPARATOR '\u001F'),
+            '\u001F',
+            1
+          ) AS NOME_EQUIPE,
+          SUBSTRING_INDEX(
+            GROUP_CONCAT(NULLIF(TRIM(CAST(NOME_SUPERVISOR AS CHAR)), '') ORDER BY CASE WHEN DATA IS NOT NULL THEN 1 ELSE 0 END DESC, STR_TO_DATE(DATA, '%d/%m/%Y') DESC, id DESC SEPARATOR '\u001F'),
+            '\u001F',
+            1
+          ) AS NOME_SUPERVISOR
+        FROM \`${reportTable}\`
+        WHERE COD_EQUIPE IS NOT NULL AND TRIM(CAST(COD_EQUIPE AS CHAR)) <> ''
+        GROUP BY TRIM(CAST(COD_EQUIPE AS CHAR))
+      ) report ON report.COD_EQUIPE = TRIM(CAST(lp.COD_EQUIPE AS CHAR))
+      WHERE ${where.map((part) => `lp.${part}`).join(" AND ")}
+      ORDER BY lp.DATA ASC, lp.COD_EQUIPE ASC
     `, params);
 
     res.json({ database, view, count: rows.length, rows });
