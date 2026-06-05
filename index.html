@@ -32,10 +32,14 @@
             <button class="menu-modo-item" data-icon="NEC" data-modo="report-nec" type="button"><span class="menu-item-kicker">Painel externo</span><strong>Painel Report NEC</strong></button>
             <button class="menu-modo-item" data-icon="J" data-modo="report-jornada" type="button"><span class="menu-item-kicker">Painel externo</span><strong>Report Jornada</strong></button>
             <button class="menu-modo-item" data-icon="AND" data-action="abrir-andon" type="button"><span class="menu-item-kicker">Painel externo</span><strong>ANDON</strong></button>
+            <button class="menu-modo-item" data-icon="PA" data-action="abrir-painel-analitico" type="button"><span class="menu-item-kicker">Editável</span><strong>Painel Analítico</strong></button>
+            <button class="menu-modo-item" data-icon="PS" data-action="abrir-painel-servicos-analitico" type="button"><span class="menu-item-kicker">Serviços</span><strong>Painel Serviços Analítico</strong></button>
+            <button class="menu-modo-item" data-icon="PJ" data-action="abrir-painel-jornada-analitico" type="button"><span class="menu-item-kicker">Jornada</span><strong>Painel Jornada Analítico</strong></button>
             <button class="menu-modo-item" data-icon="G" data-modo="geral" type="button"><span class="menu-item-kicker">Resumo</span><strong>Tabela Geral</strong></button>
 
             <div class="drawer-section-label">Ferramentas do sistema</div>
             <button class="menu-modo-item" data-icon="AC" data-action="abrir-acordos" type="button"><span class="menu-item-kicker">Modal</span><strong>Acordos</strong></button>
+            <button class="menu-modo-item" data-icon="R7" data-action="abrir-rc07" type="button"><span class="menu-item-kicker">Serviços</span><strong>RC07</strong></button>
             <button class="menu-modo-item menu-item-secreto-rs" data-icon="R$" data-action="abrir-acordos-rs" type="button" aria-label="Atalho reservado"><span class="menu-item-kicker">Modal</span><strong>R$ Acordo</strong></button>
             <button class="menu-modo-item" data-icon="JUS" data-action="abrir-justificativas" type="button"><span class="menu-item-kicker">Modal</span><strong>Justificativas</strong></button>
             <button class="menu-modo-item" data-icon="BK" data-action="abrir-busca-global" type="button"><span class="menu-item-kicker">Ferramenta</span><strong>Busca global</strong></button>
@@ -104,12 +108,22 @@
 
                     <div class="filtro-grupo hidden" id="grupoSemana">
                         <label for="semanaSelect">Semana</label>
-                        <input type="week" id="semanaSelect">
+                        <div class="painel-picker-wrapper">
+                            <input type="week" id="semanaSelect" class="painel-picker-native">
+                            <input type="text" id="semanaDisplay" class="painel-picker-display" readonly placeholder="dd/mm/aaaa">
+                            <button type="button" id="semanaClear" class="painel-picker-clear" aria-label="Limpar semana">×</button>
+                            <div id="semanaPopup" class="painel-picker-popup hidden"></div>
+                        </div>
                     </div>
 
                     <div class="filtro-grupo hidden" id="grupoMes">
                         <label for="mesSelect">Mês</label>
-                        <input type="month" id="mesSelect">
+                        <div class="painel-picker-wrapper">
+                            <input type="month" id="mesSelect" class="painel-picker-native">
+                            <input type="text" id="mesDisplay" class="painel-picker-display" readonly placeholder="mm/aaaa">
+                            <button type="button" id="mesClear" class="painel-picker-clear" aria-label="Limpar mês">×</button>
+                            <div id="mesPopup" class="painel-picker-popup painel-month-popup hidden"></div>
+                        </div>
                     </div>
 
                     <div class="filtro-grupo hidden" id="grupoPeriodoInicio">
@@ -574,6 +588,91 @@
         </div>
     </div>
 
+    <!-- MODAL ANÁLISE MED. IMPROD. -->
+    <div id="modalAnaliseImprod" class="modal hidden">
+        <div class="modal-content modal-analise-improd">
+            <div class="modal-header">
+                <h3 id="modalAnaliseImprodTitulo">Análise de Improdutividade</h3>
+                <div class="modal-header-actions">
+                    <button type="button" id="btnAnaliseCodx" onclick="trocarVisaoAnaliseImprod('codx')">Código X</button>
+                    <button type="button" id="btnAnaliseJust" onclick="trocarVisaoAnaliseImprod('justificativas')">Justificativas</button>
+                    <button type="button" onclick="baixarModalAnaliseImprodImagem()">Exportar imagem</button>
+                    <button type="button" id="btnFullscreenAnaliseImprod" onclick="toggleFullscreenAnaliseImprod()">Expandir</button>
+                    <button type="button" onclick="fecharModalAnaliseImprod()">&times;</button>
+                </div>
+            </div>
+            <div class="modal-meta" id="modalAnaliseImprodMeta"></div>
+            <div class="analise-improd-grid">
+                <div class="analise-improd-chart" id="analiseImprodChart"></div>
+                <div class="table-wrap modal-table-wrap">
+                    <table class="modal-improd-table">
+                        <thead>
+                            <tr id="analiseImprodHead"></tr>
+                        </thead>
+                        <tbody id="analiseImprodBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL % IMPRODUTIVO TABELA GERAL -->
+    <div id="modalImprodTabelaGeral" class="modal hidden">
+        <div class="modal-content modal-improd-geral">
+            <div class="modal-header">
+                <h3 id="modalImprodTabelaGeralTitulo">% IMPRODUTIVO</h3>
+                <div class="modal-header-actions">
+                    <button type="button" onclick="baixarModalImprodTabelaGeralImagem()">Exportar imagem</button>
+                    <button type="button" id="btnFullscreenImprodTabelaGeral" onclick="toggleFullscreenImprodTabelaGeral()">Expandir</button>
+                    <button type="button" onclick="fecharModalImprodTabelaGeral()">&times;</button>
+                </div>
+            </div>
+            <div class="modal-meta" id="modalImprodTabelaGeralMeta"></div>
+            <div class="improd-geral-kpis">
+                <div class="improd-geral-kpi">
+                    <span>Eqp. Efetivas</span>
+                    <strong id="improdKpiEquipes">0</strong>
+                </div>
+                <div class="improd-geral-kpi">
+                    <span>Saldo U.S Perda<br>Serv. Imp.</span>
+                    <strong id="improdKpiUsPerda">0.000</strong>
+                </div>
+                <div class="improd-geral-kpi">
+                    <span>Tipo de Serviço, Líder de<br>Improd.</span>
+                    <strong id="improdKpiTipoLider">-</strong>
+                </div>
+                <div class="improd-geral-kpi">
+                    <span>Cod. mais usado</span>
+                    <strong id="improdKpiCodMaisUsado">-</strong>
+                </div>
+                <div class="improd-geral-kpi">
+                    <span>% Improdutivo:<br><small>Meta: <b>18%</b></small></span>
+                    <strong id="improdKpiPerc">0.00%</strong>
+                </div>
+            </div>
+            <div class="table-wrap modal-table-wrap">
+                <table class="modal-improd-table">
+                    <thead>
+                        <tr>
+                            <th data-improd-sort="0">Data Atualizacao <span class="sort-indicator">↕</span></th>
+                            <th data-improd-sort="1">U.O. <span class="sort-indicator">↕</span></th>
+                            <th data-improd-sort="2">Supervisor <span class="sort-indicator">↕</span></th>
+                            <th data-improd-sort="3">Cod. Equipe <span class="sort-indicator">↕</span></th>
+                            <th data-improd-sort="4">Equipe <span class="sort-indicator">↕</span></th>
+                            <th data-improd-sort="5">Serviço <span class="sort-indicator">↕</span></th>
+                            <th data-improd-sort="6">Tipo Serviço <span class="sort-indicator">↕</span></th>
+                            <th data-improd-sort="7">COD. ATIV. <span class="sort-indicator">↕</span></th>
+                            <th data-improd-sort="8">US Prev. <span class="sort-indicator">↕</span></th>
+                            <th data-improd-sort="9">US Perda. <span class="sort-indicator">↕</span></th>
+                            <th data-improd-sort="10">% Improd. Meta <span class="sort-indicator">↕</span></th>
+                        </tr>
+                    </thead>
+                    <tbody id="modalImprodTabelaGeralBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL ESTRATIFICACAO DE SERVICOS -->
     <div id="modalControleServico" class="modal hidden">
         <div class="modal-content modal-controle-servico">
@@ -674,6 +773,120 @@
                             </tr>
                         </thead>
                         <tbody id="modalControleServicoBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL RC07 -->
+    <div id="modalRc07" class="modal hidden">
+        <div class="modal-content modal-rc07">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <h3 id="modalRc07Titulo">SERVIÇOS RC07</h3>
+                    <div id="modalRc07Meta" class="modal-subtitle modal-subtitle-inline"></div>
+                </div>
+                <div class="acoes-modal">
+                    <button id="btnAbrirTabelaRc07Flegadas" class="btn-topo-acao rc07-export-btn" type="button" onclick="abrirModalTabelaRc07Flegadas()" title="Abrir tabela somente com equipes flegadas">Tabela flegadas</button>
+                    <button id="btnExportarRc07Flegadas" class="btn-topo-acao rc07-export-btn" type="button" onclick="baixarRc07FlegadasImagem()" title="Exportar imagem das equipes flegadas">⬇ Flegadas</button>
+                    <button id="btnFullscreenRc07" class="btn-topo-acao rc07-fullscreen-btn" type="button" onclick="alternarTelaCheiaRc07()" title="Expandir para tela cheia">⛶ Tela cheia</button>
+                    <span class="close" onclick="fecharModalRc07()">&times;</span>
+                </div>
+            </div>
+
+            <div class="modal-body" id="areaModalRc07">
+                <div class="justificativas-historico-filtros rc07-filtros">
+                    <div class="filtro-grupo">
+                        <label for="rc07Data">Data</label>
+                        <input id="rc07Data" type="date">
+                    </div>
+                    <div class="filtro-grupo">
+                        <label for="rc07Uo">UO</label>
+                        <select id="rc07Uo"></select>
+                    </div>
+                    <div class="filtro-grupo filtro-grupo-supervisor">
+                        <label for="rc07Supervisor">Supervisor</label>
+                        <select id="rc07Supervisor"></select>
+                    </div>
+                    <button id="btnRc07Aplicar" class="btn-full" type="button">Aplicar filtros</button>
+                </div>
+
+                <div id="kpisRc07" class="kpis kpis-acordos">
+                    <div class="kpi rc07-kpi-click" id="cardKpiRc07Flegadas" onclick="alternarFiltroRc07Flegadas()" title="Mostrar somente equipes flegadas">
+                        <h4>Eq. Flegadas RC07</h4>
+                        <div class="valor" id="kpiRc07Total">0</div>
+                    </div>
+                    <div class="kpi">
+                        <h4>Equipes</h4>
+                        <div class="valor" id="kpiRc07Equipes">0</div>
+                    </div>
+                    <div class="kpi">
+                        <h4>Meta Total</h4>
+                        <div class="valor" id="kpiRc07Meta">0.000</div>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table class="modal-tabela tabela-rc07">
+                        <thead>
+                            <tr>
+                                <th data-rc07-col="desg">DESG. RC07</th>
+                                <th data-rc07-col="codigo">Cod.Ep.</th>
+                                <th data-rc07-col="frota">Frota</th>
+                                <th class="col-equipe" data-rc07-col="equipe">Equipes</th>
+                                <th data-rc07-col="meta">Meta</th>
+                                <th data-rc07-col="prod">Prod.</th>
+                                <th data-rc07-col="faixa">Faixa Dia</th>
+                                <th data-rc07-col="perc">%Prod</th>
+                                <th>Serviços</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalRc07Body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL TABELA RC07 FLEGADAS -->
+    <div id="modalRc07FlegadasTabela" class="modal hidden">
+        <div class="modal-content modal-rc07-flegadas">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <h3 id="modalRc07FlegadasTitulo">TABELA RC07 FLEGADAS</h3>
+                    <div id="modalRc07FlegadasMeta" class="modal-subtitle modal-subtitle-inline"></div>
+                </div>
+                <div class="acoes-modal">
+                    <button id="btnExportarRc07FlegadasTabela" class="btn-topo-acao rc07-export-btn" type="button" onclick="baixarTabelaRc07FlegadasImagem()" title="Exportar imagem da tabela RC07 flegadas">⬇ Imagem</button>
+                    <button id="btnFullscreenRc07Flegadas" class="btn-topo-acao rc07-fullscreen-btn" type="button" onclick="alternarTelaCheiaRc07Flegadas()" title="Expandir para tela cheia">⛶ Tela cheia</button>
+                    <span class="close" onclick="fecharModalTabelaRc07Flegadas()">&times;</span>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="table-wrap rc07-flegadas-wrap">
+                    <table class="modal-tabela tabela-rc07-flegadas">
+                        <thead>
+                            <tr>
+                                <th>Cod.Ep.</th>
+                                <th>Frota</th>
+                                <th class="col-equipe">Equipes</th>
+                                <th>Meta</th>
+                                <th>Prod.</th>
+                                <th>Faixa Mom.</th>
+                                <th>%Prod.Mom.</th>
+                                <th>Total S.</th>
+                                <th>RC07 Design.</th>
+                                <th>RC07</th>
+                                <th>Prod. RC07</th>
+                                <th>Improd.</th>
+                                <th>%Impr.</th>
+                                <th>1º Atend. RC07</th>
+                                <th>Ult.Atend. RC07</th>
+                                <th>Faixa F</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalRc07FlegadasBody"></tbody>
                     </table>
                 </div>
             </div>
@@ -1157,6 +1370,6 @@
         </div>
     </footer>
 
-    <script src="script.js?v=20260505-lite1"></script>
+    <script src="script.js?v=20260519-periodo-loading"></script>
 </body>
 </html>

@@ -5,6 +5,12 @@ const periodoTabelaSelect = document.getElementById("periodoTabelaSelect");
 const dataSelect = document.getElementById("dataSelect");
 const semanaSelect = document.getElementById("semanaSelect");
 const mesSelect = document.getElementById("mesSelect");
+const semanaDisplay = document.getElementById("semanaDisplay");
+const semanaClear = document.getElementById("semanaClear");
+const semanaPopup = document.getElementById("semanaPopup");
+const mesDisplay = document.getElementById("mesDisplay");
+const mesClear = document.getElementById("mesClear");
+const mesPopup = document.getElementById("mesPopup");
 const periodoInicioSelect = document.getElementById("periodoInicioSelect");
 const periodoFimSelect = document.getElementById("periodoFimSelect");
 const tipoSelect = document.getElementById("tipoSelect");
@@ -103,6 +109,42 @@ const modalControleServico = document.getElementById("modalControleServico");
 const modalControleServicoBody = document.getElementById("modalControleServicoBody");
 const modalControleServicoTitulo = document.getElementById("modalControleServicoTitulo");
 const modalControleServicoSubtitle = document.getElementById("modalControleServicoSubtitle");
+const modalRc07 = document.getElementById("modalRc07");
+const modalRc07Body = document.getElementById("modalRc07Body");
+const modalRc07Titulo = document.getElementById("modalRc07Titulo");
+const modalRc07Meta = document.getElementById("modalRc07Meta");
+const modalRc07FlegadasTabela = document.getElementById("modalRc07FlegadasTabela");
+const modalRc07FlegadasTitulo = document.getElementById("modalRc07FlegadasTitulo");
+const modalRc07FlegadasMeta = document.getElementById("modalRc07FlegadasMeta");
+const modalRc07FlegadasBody = document.getElementById("modalRc07FlegadasBody");
+const kpiRc07Total = document.getElementById("kpiRc07Total");
+const kpiRc07Equipes = document.getElementById("kpiRc07Equipes");
+const kpiRc07Meta = document.getElementById("kpiRc07Meta");
+const rc07Data = document.getElementById("rc07Data");
+const rc07Uo = document.getElementById("rc07Uo");
+const rc07Supervisor = document.getElementById("rc07Supervisor");
+const btnRc07Aplicar = document.getElementById("btnRc07Aplicar");
+const btnFullscreenRc07 = document.getElementById("btnFullscreenRc07");
+const btnFullscreenRc07Flegadas = document.getElementById("btnFullscreenRc07Flegadas");
+const modalImprodTabelaGeral = document.getElementById("modalImprodTabelaGeral");
+const modalImprodTabelaGeralTitulo = document.getElementById("modalImprodTabelaGeralTitulo");
+const modalImprodTabelaGeralMeta = document.getElementById("modalImprodTabelaGeralMeta");
+const modalImprodTabelaGeralBody = document.getElementById("modalImprodTabelaGeralBody");
+const btnFullscreenImprodTabelaGeral = document.getElementById("btnFullscreenImprodTabelaGeral");
+const modalAnaliseImprod = document.getElementById("modalAnaliseImprod");
+const modalAnaliseImprodTitulo = document.getElementById("modalAnaliseImprodTitulo");
+const modalAnaliseImprodMeta = document.getElementById("modalAnaliseImprodMeta");
+const analiseImprodChart = document.getElementById("analiseImprodChart");
+const analiseImprodHead = document.getElementById("analiseImprodHead");
+const analiseImprodBody = document.getElementById("analiseImprodBody");
+const btnAnaliseCodx = document.getElementById("btnAnaliseCodx");
+const btnAnaliseJust = document.getElementById("btnAnaliseJust");
+const btnFullscreenAnaliseImprod = document.getElementById("btnFullscreenAnaliseImprod");
+const improdKpiEquipes = document.getElementById("improdKpiEquipes");
+const improdKpiUsPerda = document.getElementById("improdKpiUsPerda");
+const improdKpiTipoLider = document.getElementById("improdKpiTipoLider");
+const improdKpiCodMaisUsado = document.getElementById("improdKpiCodMaisUsado");
+const improdKpiPerc = document.getElementById("improdKpiPerc");
 const controleServicoLider = document.getElementById("controleServicoLider");
 const controleServicoControlador = document.getElementById("controleServicoControlador");
 const controleServicoTotal = document.getElementById("controleServicoTotal");
@@ -231,11 +273,15 @@ const caixaFaixaDiaCodxBody = document.getElementById("caixaFaixaDiaCodxBody");
 let dados = [];
 let dadosBase = [];
 let carregandoDadosTotalHoras = false;
+let carregandoDadosPainel = false;
 let reqSeqDadosTotalHoras = 0;
 let reqSeqDadosPainel = 0;
 let chaveDadosCarregados = "";
 let campoGlobal = "";
 let modoTabela = "diario";
+let currentImprodTabelaGeralLinhas = [];
+let currentImprodTabelaGeralSort = { coluna: null, direcao: "desc" };
+let currentAnaliseImprod = { visao: "codx", codx: [], justificativas: [], titulo: "", meta: "", eqDSemCodx: 0 };
 
 const FAIXAS = ["09", "11", "13", "15", "17"];
 const FAIXAS_TARDE = ["10", "12", "14", "16", "18"];
@@ -323,6 +369,8 @@ let acordosHistorySavePromise = Promise.resolve();
 let currentTabelaGeralResumo = null;
 let currentTabelaGeralSupervisorSelecionado = "";
 let tabelaGeralOrdenacao = { coluna: null, direcao: "asc" };
+let analiseJustificativasFiltros = {};
+let analiseJustificativasOrdenacao = { key: "", direcao: "asc" };
 
 const VALOR_RS_POR_UNIDADE = 2300;
 const XLSX_CDN_URL = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
@@ -417,10 +465,8 @@ function getWeekRangeFromIsoDateClient(isoDate) {
     const date = new Date(`${isoDate}T00:00:00`);
     if (Number.isNaN(date.getTime())) return null;
 
-    const day = date.getDay();
-    const diffToMonday = day === 0 ? -6 : 1 - day;
     const start = new Date(date);
-    start.setDate(date.getDate() + diffToMonday);
+    start.setDate(date.getDate() - date.getDay());
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
 
@@ -544,6 +590,7 @@ function normalizarLinhaPainel(linha) {
     const valorUltimoAtendimento = obterValorColuna(base, ["Ult. Atendimento", "ULTIMO_ATENDIMENTO"]);
     const valorHora = obterValorColuna(base, ["Hora", "HORA", "hora_atualizacao"]);
     const valorData = obterValorColuna(base, ["Data", "DATA"]);
+    const valorNomeEquipe = obterValorColuna(base, ["Nome", "NOME_EQUIPE", "NOME", "EQUIPE"]);
 
     preencherAliasColuna(base, valorUo, ["Cód.UO", "CÃ³d.UO", "CÃƒÂ³d.UO", "COD_UO", "UO"]);
     preencherAliasColuna(base, valorEquipe, ["Cód. Equipe", "CÃ³d. Equipe", "CÃƒÂ³d. Equipe", "COD_EQUIPE"]);
@@ -553,6 +600,7 @@ function normalizarLinhaPainel(linha) {
     preencherAliasColuna(base, valorUltimoAtendimento, ["Ult. Atendimento", "ULTIMO_ATENDIMENTO"]);
     preencherAliasColuna(base, valorHora, ["Hora", "HORA", "hora_atualizacao"]);
     preencherAliasColuna(base, valorData, ["Data", "DATA"]);
+    preencherAliasColuna(base, valorNomeEquipe, ["Nome", "NOME_EQUIPE", "NOME", "EQUIPE"]);
 
     return base;
 }
@@ -1257,6 +1305,17 @@ function atualizarIndicadorStatusDados(payload) {
         `Controle: ${controle.ultima_atualizacao_br || "-"} | Horário de Brasília`;
 }
 
+function atualizarIndicadorCarregamentoPainel(carregando, mensagem = "Carregando dados do período...") {
+    carregandoDadosPainel = Boolean(carregando);
+    if (!statusDadosTopo || !statusDadosResumo) return;
+
+    if (carregandoDadosPainel) {
+        statusDadosTopo.classList.remove("status-ok", "status-atencao", "status-atrasado", "status-erro");
+        statusDadosTopo.classList.add("status-carregando");
+        statusDadosResumo.innerText = mensagem;
+    }
+}
+
 async function carregarStatusDados() {
     try {
         const resp = await fetch("/api/status/dados", { cache: "no-store" });
@@ -1668,6 +1727,9 @@ function montarParametrosDadosPainel({ forcarTotalHoras = false } = {}) {
     if (uo) qs.set("uo", uo);
 
     const periodoFiltro = telaAceitaFiltroPeriodo() ? obterPeriodoFiltroAtual() : "";
+    if (modoTabela === "geral" && periodoFiltro && periodoFiltro !== "diario") {
+        qs.set("view", "tabelaGeralPeriodo");
+    }
 
     if (modoTabela === "semanal" || periodoFiltro === "semanal") {
         const semana = String(semanaSelect?.value || "").trim();
@@ -1724,6 +1786,7 @@ async function carregarDadosPainelAtual({ forcar = false, forcarTotalHoras = fal
     }
 
     const seq = ++reqSeqDadosPainel;
+    atualizarIndicadorCarregamentoPainel(true);
 
     try {
         const resp = await fetch(`/api/report?${chave}`, { cache: "no-store" });
@@ -1744,7 +1807,26 @@ async function carregarDadosPainelAtual({ forcar = false, forcarTotalHoras = fal
     } catch (error) {
         console.error("Erro ao carregar dados do painel:", error);
         return false;
+    } finally {
+        if (seq === reqSeqDadosPainel) {
+            atualizarIndicadorCarregamentoPainel(false);
+        }
     }
+}
+
+async function recarregarDadosPainelEAplicar(opcoes = {}) {
+    const ok = await carregarDadosPainelAtual(opcoes);
+    if (!ok) {
+        if (statusDadosTopo && statusDadosResumo) {
+            statusDadosTopo.classList.remove("status-ok", "status-atencao", "status-atrasado", "status-carregando");
+            statusDadosTopo.classList.add("status-erro");
+            statusDadosResumo.innerText = "Falha ao carregar dados do período. Tente novamente ou reduza o filtro.";
+        }
+        return false;
+    }
+    await aplicar();
+    carregarStatusDados();
+    return true;
 }
 
 async function atualizarTabelaGeralComDadosDoBanco() {
@@ -1841,6 +1923,7 @@ function montarCabecalhoGeral(tipo, usarLote = false) {
         "Faixa Dia",
         "% PROD.DIA",
         ...(usarLote ? [
+            "Meta Lote",
             "Prod. Lote",
             "% PROD.LOTE",
             "Faixa Lote"
@@ -2043,13 +2126,13 @@ function aplicarVisualKpiFaixa(faixa) {
 function atualizarRotuloKpiAA() {
     const titulo = kpiAA?.previousElementSibling;
     if (!titulo) return;
-    titulo.innerText = modoTabela === "geral" ? "Serviços Designados" : "AA";
+    titulo.innerText = modoTabela === "geral" ? "Motos Meta Média" : "AA";
 }
 
 function atualizarRotuloKpiA() {
     const titulo = kpiA?.previousElementSibling;
     if (!titulo) return;
-    titulo.innerText = modoTabela === "geral" ? "Serviços Produtivos" : "A";
+    titulo.innerText = modoTabela === "geral" ? "Méd.Eq. D Moto Dia" : "A";
 }
 
 function atualizarRotuloKpiB() {
@@ -2099,6 +2182,106 @@ function atualizarEstiloKpiPercImprod(percentual = 0) {
         : "#111827";
 }
 
+function aplicarRotulosKpisPadrao() {
+    kpiFaixa?.querySelector("h4") && (kpiFaixa.querySelector("h4").innerText = "Class. UO");
+    definirRotuloKpi(kpiMeta, "Meta Hora");
+    definirRotuloKpi(kpiProd, "Prod. Hora");
+    definirRotuloKpi(kpiSaldo, "Saldo US");
+    definirRotuloKpi(kpiFT, "Força Trab.");
+}
+
+function definirRotuloKpi(valorEl, texto) {
+    const titulo = valorEl?.previousElementSibling;
+    if (titulo) titulo.innerText = texto;
+}
+
+function textoKpiMediaMetaReal(meta, real) {
+    const metaNum = Number(meta || 0);
+    const realNum = Number(real || 0);
+    const cor = realNum < metaNum ? "#dc2626" : "#15803d";
+    return `${fmtDecBR(metaNum, 2)} <span class="kpi-media-real" style="color:${cor}">${fmtDecBR(realNum, 2)}</span>`;
+}
+
+function obterTipoEquipeOperacional(item = {}) {
+    const texto = normalizarTextoEquipeOperacional([
+        item.tipoEquipe,
+        item.tipo,
+        item.tipoVeiculo,
+        item.modalidade,
+        item.marcadorOperacional,
+        item.equipe,
+        item.nome,
+        item.frota,
+        item.codigo
+    ].join(" "));
+    const textoCompacto = texto.replace(/\s*-\s*/g, "-");
+
+    if (textoCompacto.includes("-MF")) return "multi";
+    if (textoCompacto.includes("-MT")) return "moto";
+    if (/(^|[^A-Z])MF([^A-Z]|$)/.test(texto)) return "multi";
+    if (/(^|[^A-Z])MT([^A-Z]|$)/.test(texto)) return "moto";
+    if (/\bMULTI\b|MULTIFUNC|MULTI/.test(texto)) return "multi";
+    if (/\bMOTO\b|MOTOCIC|MOTORIZ/.test(texto)) return "moto";
+    return "";
+}
+
+function normalizarTextoEquipeOperacional(valor) {
+    return String(valor || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[–—−]/g, "-")
+        .toUpperCase();
+}
+
+function obterMarcadorOperacionalLinha(linha = {}) {
+    return normalizarTextoEquipeOperacional(Object.values(linha).join(" "));
+}
+
+function calcularKpisOperacionaisTabelaGeral(lista = []) {
+    const motos = lista.filter(item => obterTipoEquipeOperacional(item) === "moto");
+    const multis = lista.filter(item => obterTipoEquipeOperacional(item) === "multi");
+    const eqDMoto = motos.filter(item => String(item.faixaDiaCompleta || item.faixaDia || "").toUpperCase() === "D").length;
+    const eqDMulti = multis.filter(item => String(item.faixaDiaCompleta || item.faixaDia || "").toUpperCase() === "D").length;
+
+    return {
+        motos: motos.length,
+        multis: multis.length,
+        metaMediaMoto: mediaNumerica(motos.map(item => toNumber(item.metaDia || item.meta))),
+        metaMediaMulti: mediaNumerica(multis.map(item => toNumber(item.metaDia || item.meta))),
+        prodMediaMoto: mediaNumerica(motos.map(item => toNumber(item.prodDia || item.prod))),
+        prodMediaMulti: mediaNumerica(multis.map(item => toNumber(item.prodDia || item.prod))),
+        eqDMoto,
+        eqDMulti
+    };
+}
+
+function calcularKpisOperacionaisLinhasTabelaGeral({ data = "", uo = "", nome = "", hora = "" } = {}) {
+    const mapa = new Map();
+    const horaRef = normalizarHora(hora);
+
+    obterLinhasPorDataUo(data, uo).forEach((linha) => {
+        if (nome && (linha[campoGlobal] || "N/I") !== nome) return;
+        if (horaRef && obterHoraLinhaModalEquipes(linha) !== horaRef) return;
+
+        const codigo = obterCodigoEquipeLinha(linha);
+        if (!codigo) return;
+
+        const atual = mapa.get(codigo) || {
+            codigo,
+            equipe: "",
+            frota: "",
+            marcadorOperacional: ""
+        };
+
+        atual.equipe = atual.equipe || obterValorColuna(linha, ["Nome", "NOME_EQUIPE", "NOME", "EQUIPE"]);
+        atual.frota = atual.frota || obterFrotaLinha(linha);
+        atual.marcadorOperacional = `${atual.marcadorOperacional} ${obterMarcadorOperacionalLinha(linha)}`;
+        mapa.set(codigo, atual);
+    });
+
+    return calcularKpisOperacionaisTabelaGeral([...mapa.values()]);
+}
+
 function aplicarKpisResumoTabelaGeral(resumo) {
     if (!resumo) return;
 
@@ -2111,8 +2294,12 @@ function aplicarKpisResumoTabelaGeral(resumo) {
     const totalImprodutivos = Number(resumo.totalServicosImprodutivos || 0);
     const percImprod = totalExecutados > 0 ? (totalImprodutivos / totalExecutados) * 100 : 0;
     const percProdDia = metaDia > 0 ? (prodDia / metaDia) * 100 : 0;
-    const faixa = classificar(percProdDia);
+    const loteMeta = Number(resumo.loteMeta || 0);
+    const loteProd = Number(resumo.loteProd || 0);
+    const percLote = loteMeta > 0 ? (loteProd / loteMeta) * 100 : percProdDia;
+    const faixa = loteMeta > 0 ? classificar(percLote) : classificar(percProdDia);
     const saldo = prodDia - metaDia;
+    const operacionais = resumo.operacionais || calcularKpisOperacionaisTabelaGeral(resumo.listaEquipes || []);
 
     atualizarRotuloKpiAA();
     atualizarRotuloKpiA();
@@ -2121,18 +2308,27 @@ function aplicarKpisResumoTabelaGeral(resumo) {
     atualizarVisibilidadeKpiImprodBruto();
     atualizarEstiloKpisGerais();
 
-    kpiMeta.innerText = fmt3(metaDia);
-    kpiProd.innerText = fmt3(prodDia);
-    kpiSaldo.innerText = fmt3(saldo);
-    kpiSaldo.style.color = saldo < 0 ? "#dc2626" : "#15803d";
-    kpiFaixaTxt.innerText = `${faixa} - ${percProdDia.toFixed(0)}%`;
+    definirRotuloKpi(kpiMeta, "Saldo US");
+    definirRotuloKpi(kpiProd, "Força Trab.");
+    definirRotuloKpi(kpiSaldo, "Motos");
+    definirRotuloKpi(kpiFT, "Multi");
+    definirRotuloKpi(kpiExecutados, "Multi Meta Média");
+    definirRotuloKpi(kpiImprodBruto, "Méd.Eq. D Multi.Dia");
+
+    kpiFaixa?.querySelector("h4") && (kpiFaixa.querySelector("h4").innerText = "Class. - Lote");
+    kpiFaixaTxt.innerText = `${faixa}-${percLote.toFixed(0)}%`;
     aplicarVisualKpiFaixa(faixa);
 
-    kpiFT.innerText = Number(totalEq || 0).toFixed(0);
-    kpiAA.innerText = Number(totalDesignados || 0).toFixed(0);
-    if (kpiExecutados) kpiExecutados.innerText = Number(totalExecutados || 0).toFixed(0);
-    kpiA.innerText = Number(totalProdutivos || 0).toFixed(0);
-    if (kpiImprodBruto) kpiImprodBruto.innerText = Number(totalImprodutivos || 0).toFixed(0);
+    kpiMeta.innerText = fmt3(saldo);
+    kpiMeta.style.color = saldo < 0 ? "#dc2626" : "#15803d";
+    kpiProd.innerText = Number(totalEq || 0).toFixed(0);
+    kpiSaldo.innerText = Number(operacionais.motos || 0).toFixed(0);
+    kpiSaldo.style.color = "#111827";
+    kpiFT.innerText = Number(operacionais.multis || 0).toFixed(0);
+    kpiAA.innerHTML = textoKpiMediaMetaReal(operacionais.metaMediaMoto || 0, operacionais.prodMediaMoto || 0);
+    if (kpiExecutados) kpiExecutados.innerHTML = textoKpiMediaMetaReal(operacionais.metaMediaMulti || 0, operacionais.prodMediaMulti || 0);
+    kpiA.innerText = Number(operacionais.eqDMoto || 0).toFixed(0);
+    if (kpiImprodBruto) kpiImprodBruto.innerText = Number(operacionais.eqDMulti || 0).toFixed(0);
     kpiB.innerText = `${percImprod.toFixed(2)}%`;
     atualizarEstiloKpiPercImprod(percImprod);
 }
@@ -2162,6 +2358,7 @@ function alternarKpisSupervisorTabelaGeral(nomeSupervisor) {
 }
 
 function zerarKpis(casasQtd = 0) {
+    if (modoTabela !== "geral") aplicarRotulosKpisPadrao();
     atualizarRotuloKpiAA();
     atualizarRotuloKpiA();
     atualizarRotuloKpiB();
@@ -2169,6 +2366,7 @@ function zerarKpis(casasQtd = 0) {
     atualizarVisibilidadeKpiImprodBruto();
     atualizarEstiloKpisGerais();
     kpiMeta.innerText = "0.000";
+    kpiMeta.style.color = "#111827";
     kpiProd.innerText = "0.000";
     kpiSaldo.innerText = "0.000";
     kpiSaldo.style.color = "#111827";
@@ -2188,6 +2386,7 @@ function zerarKpis(casasQtd = 0) {
 }
 
 function atualizarKpis(totalMeta, totalProd, eqTot, casasQtd = 0) {
+    if (modoTabela !== "geral") aplicarRotulosKpisPadrao();
     atualizarRotuloKpiAA();
     atualizarRotuloKpiA();
     atualizarRotuloKpiB();
@@ -2195,6 +2394,7 @@ function atualizarKpis(totalMeta, totalProd, eqTot, casasQtd = 0) {
     atualizarVisibilidadeKpiImprodBruto();
     atualizarEstiloKpisGerais();
     kpiMeta.innerText = fmt3(totalMeta);
+    kpiMeta.style.color = "#111827";
     kpiProd.innerText = fmt3(totalProd);
 
     const saldo = totalProd - totalMeta;
@@ -2337,7 +2537,7 @@ function setModo(modo, reaplicar = true) {
             return;
         }
 
-        carregarDadosPainelAtual().finally(() => aplicar());
+        recarregarDadosPainelEAplicar();
     }
 }
 
@@ -2393,6 +2593,7 @@ function atualizarOrdemKpisPrincipais() {
 
 function obterSemanaISODeData(dataISO) {
     const dt = new Date(dataISO + "T00:00:00");
+    if (dt.getDay() === 0) dt.setDate(dt.getDate() + 1);
     const dia = (dt.getDay() + 6) % 7;
     dt.setDate(dt.getDate() - dia + 3);
 
@@ -2405,6 +2606,275 @@ function obterSemanaISODeData(dataISO) {
     const semana = 1 + Math.round((dt - primeiraQuinta) / (7 * 24 * 60 * 60 * 1000));
 
     return `${ano}-W${String(semana).padStart(2, "0")}`;
+}
+
+const MESES_PICKER_PT = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+let semanaPickerMes = new Date();
+let mesPickerAno = new Date().getFullYear();
+let semanaPickerAberto = false;
+let mesPickerAberto = false;
+
+function dataLocalDeIso(dataISO) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dataISO || ""));
+    if (!match) return null;
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function formatarDataPickerBr(data) {
+    return data instanceof Date && !Number.isNaN(data.getTime())
+        ? data.toLocaleDateString("pt-BR")
+        : "";
+}
+
+function formatarMesPickerBr(ano, mesZero) {
+    return new Date(ano, mesZero, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+}
+
+function atualizarDisplaySemanaTabela() {
+    if (!semanaDisplay) return;
+    const semana = String(semanaSelect?.value || "").trim();
+    if (!semana) {
+        semanaDisplay.value = "";
+        return;
+    }
+
+    const intervalo = obterInicioEFimSemanaPorInput(semana);
+    const inicio = dataLocalDeIso(intervalo.inicio);
+    const fim = dataLocalDeIso(intervalo.fim);
+    const numero = semana.split("-W")[1] || "";
+    semanaDisplay.value = inicio && fim
+        ? `Sem ${Number(numero)} (${formatarDataPickerBr(inicio).slice(0, 5)} - ${formatarDataPickerBr(fim)})`
+        : semana;
+}
+
+function atualizarDisplayMesTabela() {
+    if (!mesDisplay) return;
+    const valor = String(mesSelect?.value || "").trim();
+    const match = /^(\d{4})-(\d{2})$/.exec(valor);
+    mesDisplay.value = match ? formatarMesPickerBr(Number(match[1]), Number(match[2]) - 1) : "";
+}
+
+function selecionarSemanaTabelaPorData(data) {
+    if (!semanaSelect || !(data instanceof Date) || Number.isNaN(data.getTime())) return;
+    const valor = obterSemanaISODeData(formatISODateLocal(data));
+    semanaSelect.value = valor;
+    atualizarDisplaySemanaTabela();
+    fecharSemanaPickerTabela();
+    semanaSelect.dispatchEvent(new Event("change"));
+}
+
+function renderSemanaPickerTabela() {
+    if (!semanaPopup) return;
+    const year = semanaPickerMes.getFullYear();
+    const month = semanaPickerMes.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const selectedWeek = String(semanaSelect?.value || "");
+
+    semanaPopup.innerHTML = "";
+
+    const header = document.createElement("div");
+    header.className = "date-picker-header";
+    header.innerHTML = `
+        <button type="button" id="painelSemanaPrev">‹</button>
+        <div class="date-picker-title">${formatarMesPickerBr(year, month)}</div>
+        <button type="button" id="painelSemanaNext">›</button>
+    `;
+
+    const grid = document.createElement("div");
+    grid.className = "date-picker-grid date-picker-grid-week";
+    ["Sem", "D", "S", "T", "Q", "Q", "S", "S"].forEach((dia) => {
+        const cell = document.createElement("div");
+        cell.className = "date-picker-weekday" + (dia === "Sem" ? " week-num-header" : "");
+        cell.textContent = dia;
+        grid.appendChild(cell);
+    });
+
+    const startOffset = firstDay.getDay();
+    const endPadding = (6 - lastDay.getDay() + 7) % 7;
+    let weekStart = new Date(year, month, 1 - startOffset);
+    const calEnd = new Date(year, month, lastDay.getDate() + endPadding);
+
+    while (weekStart <= calEnd) {
+        const reference = new Date(weekStart);
+        reference.setDate(weekStart.getDate() + 1);
+        const weekValue = obterSemanaISODeData(formatISODateLocal(reference));
+        const weekNumber = Number((weekValue.split("-W")[1] || "0"));
+
+        const weekCell = document.createElement("button");
+        weekCell.type = "button";
+        weekCell.className = "date-picker-day week-num-cell" + (selectedWeek === weekValue ? " selected" : "");
+        weekCell.textContent = String(weekNumber);
+        weekCell.addEventListener("click", () => selecionarSemanaTabelaPorData(reference));
+        grid.appendChild(weekCell);
+
+        for (let col = 0; col < 7; col++) {
+            const dateVal = new Date(weekStart);
+            dateVal.setDate(weekStart.getDate() + col);
+            const dayWeek = obterSemanaISODeData(formatISODateLocal(dateVal));
+            const isCurrentMonth = dateVal.getMonth() === month && dateVal.getFullYear() === year;
+            const inWeek = selectedWeek && dayWeek === selectedWeek;
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "date-picker-day" +
+                (!isCurrentMonth ? " outside-day" : "") +
+                (inWeek ? " in-week" : "");
+            btn.textContent = String(dateVal.getDate()).padStart(2, "0");
+            btn.addEventListener("click", () => selecionarSemanaTabelaPorData(dateVal));
+            grid.appendChild(btn);
+        }
+
+        weekStart.setDate(weekStart.getDate() + 7);
+    }
+
+    const footer = document.createElement("div");
+    footer.className = "date-picker-footer";
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.textContent = "Limpar";
+    clearBtn.addEventListener("click", limparSemanaPickerTabela);
+    const todayBtn = document.createElement("button");
+    todayBtn.type = "button";
+    todayBtn.textContent = "Hoje";
+    todayBtn.addEventListener("click", () => {
+        const hoje = new Date();
+        semanaPickerMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        selecionarSemanaTabelaPorData(hoje);
+    });
+    footer.appendChild(clearBtn);
+    footer.appendChild(todayBtn);
+
+    semanaPopup.appendChild(header);
+    semanaPopup.appendChild(grid);
+    semanaPopup.appendChild(footer);
+
+    document.getElementById("painelSemanaPrev")?.addEventListener("click", () => {
+        semanaPickerMes.setMonth(semanaPickerMes.getMonth() - 1);
+        renderSemanaPickerTabela();
+    });
+    document.getElementById("painelSemanaNext")?.addEventListener("click", () => {
+        semanaPickerMes.setMonth(semanaPickerMes.getMonth() + 1);
+        renderSemanaPickerTabela();
+    });
+}
+
+function abrirSemanaPickerTabela() {
+    if (!semanaPopup || !semanaDisplay) return;
+    fecharMesPickerTabela();
+    const intervalo = obterInicioEFimSemanaPorInput(semanaSelect?.value || "");
+    const inicio = dataLocalDeIso(intervalo.inicio);
+    if (inicio) semanaPickerMes = new Date(inicio.getFullYear(), inicio.getMonth(), 1);
+    semanaPickerAberto = true;
+    semanaPopup.classList.remove("hidden");
+    semanaDisplay.classList.add("active");
+    renderSemanaPickerTabela();
+}
+
+function fecharSemanaPickerTabela() {
+    if (!semanaPickerAberto) return;
+    semanaPickerAberto = false;
+    semanaPopup?.classList.add("hidden");
+    semanaDisplay?.classList.remove("active");
+}
+
+function limparSemanaPickerTabela() {
+    if (!semanaSelect) return;
+    semanaSelect.value = "";
+    atualizarDisplaySemanaTabela();
+    fecharSemanaPickerTabela();
+    semanaSelect.dispatchEvent(new Event("change"));
+}
+
+function selecionarMesTabela(ano, mesZero) {
+    if (!mesSelect) return;
+    mesSelect.value = `${ano}-${String(mesZero + 1).padStart(2, "0")}`;
+    atualizarDisplayMesTabela();
+    fecharMesPickerTabela();
+    mesSelect.dispatchEvent(new Event("change"));
+}
+
+function renderMesPickerTabela() {
+    if (!mesPopup) return;
+    mesPopup.innerHTML = "";
+
+    const header = document.createElement("div");
+    header.className = "date-picker-header";
+    header.innerHTML = `
+        <button type="button" id="painelMesPrev">‹</button>
+        <div class="date-picker-title">${mesPickerAno}</div>
+        <button type="button" id="painelMesNext">›</button>
+    `;
+
+    const grid = document.createElement("div");
+    grid.className = "month-picker-grid";
+    const valorAtual = String(mesSelect?.value || "");
+
+    MESES_PICKER_PT.forEach((nome, idx) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "month-picker-btn";
+        const valor = `${mesPickerAno}-${String(idx + 1).padStart(2, "0")}`;
+        if (valor === valorAtual) btn.classList.add("selected");
+        btn.textContent = nome;
+        btn.addEventListener("click", () => selecionarMesTabela(mesPickerAno, idx));
+        grid.appendChild(btn);
+    });
+
+    const footer = document.createElement("div");
+    footer.className = "date-picker-footer";
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.textContent = "Limpar";
+    clearBtn.addEventListener("click", limparMesPickerTabela);
+    const currentBtn = document.createElement("button");
+    currentBtn.type = "button";
+    currentBtn.textContent = "Mês Atual";
+    currentBtn.addEventListener("click", () => {
+        const hoje = new Date();
+        mesPickerAno = hoje.getFullYear();
+        selecionarMesTabela(hoje.getFullYear(), hoje.getMonth());
+    });
+    footer.appendChild(clearBtn);
+    footer.appendChild(currentBtn);
+
+    mesPopup.appendChild(header);
+    mesPopup.appendChild(grid);
+    mesPopup.appendChild(footer);
+
+    document.getElementById("painelMesPrev")?.addEventListener("click", () => {
+        mesPickerAno--;
+        renderMesPickerTabela();
+    });
+    document.getElementById("painelMesNext")?.addEventListener("click", () => {
+        mesPickerAno++;
+        renderMesPickerTabela();
+    });
+}
+
+function abrirMesPickerTabela() {
+    if (!mesPopup || !mesDisplay) return;
+    fecharSemanaPickerTabela();
+    const match = /^(\d{4})-(\d{2})$/.exec(String(mesSelect?.value || ""));
+    if (match) mesPickerAno = Number(match[1]);
+    mesPickerAberto = true;
+    mesPopup.classList.remove("hidden");
+    mesDisplay.classList.add("active");
+    renderMesPickerTabela();
+}
+
+function fecharMesPickerTabela() {
+    if (!mesPickerAberto) return;
+    mesPickerAberto = false;
+    mesPopup?.classList.add("hidden");
+    mesDisplay?.classList.remove("active");
+}
+
+function limparMesPickerTabela() {
+    if (!mesSelect) return;
+    mesSelect.value = "";
+    atualizarDisplayMesTabela();
+    fecharMesPickerTabela();
+    mesSelect.dispatchEvent(new Event("change"));
 }
 
 function obterInicioEFimSemanaPorInput(semanaStr) {
@@ -2420,7 +2890,7 @@ function obterInicioEFimSemanaPorInput(semanaStr) {
     segundaSemana1.setDate(jan4.getDate() - diaJan4);
 
     const inicio = new Date(segundaSemana1);
-    inicio.setDate(segundaSemana1.getDate() + (semana - 1) * 7);
+    inicio.setDate(segundaSemana1.getDate() + (semana - 1) * 7 - 1);
 
     const fim = new Date(inicio);
     fim.setDate(inicio.getDate() + 6);
@@ -2460,6 +2930,7 @@ function popularSemanasDisponiveis() {
         } else {
             semanaSelect.value = semanaAtual;
         }
+        atualizarDisplaySemanaTabela();
         return;
     }
 
@@ -2477,6 +2948,7 @@ function popularSemanasDisponiveis() {
     } else {
         semanaSelect.value = "";
     }
+    atualizarDisplaySemanaTabela();
 }
 
 /* ================= ÚLTIMA FAIXA ================= */
@@ -2590,6 +3062,9 @@ function resumirPeriodo(datasPeriodo, campo, uo) {
         const faixaAtual = ultimaFaixaDisponivel(uo, data);
         if (!faixaAtual) return;
         const codigosTurnoSelecionado = obterCodigosTurnoSelecionado(data, uo);
+        const horasPeriodo = modoTabela === "geral"
+            ? obterListaHorasTabelaGeral(uo, data)
+            : FAIXAS;
 
         diasComDados++;
 
@@ -2597,14 +3072,19 @@ function resumirPeriodo(datasPeriodo, campo, uo) {
         const eqTotDia = { AA: 0, A: 0, B: 0, C: 0, D: 0 };
 
         obterLinhasPorDataUo(data, uo).forEach(l => {
-            const hora = normalizarHora(l["Hora"]);
-            if (!FAIXAS.includes(hora)) return;
+            const hora = modoTabela === "geral"
+                ? obterHoraLinha(l)
+                : normalizarHora(l["Hora"]);
+            if (!horasPeriodo.includes(hora)) return;
             const codigoEquipe = obterCodigoEquipeLinha(l);
             if (!codigoEquipe) return;
             if (!linhaPassaFiltroTurnoSelecionado(codigoEquipe, codigosTurnoSelecionado)) return;
 
             const nome = l[campo] || "N/I";
 
+            if (!cacheLocalFaixas[hora]) {
+                cacheLocalFaixas[hora] = {};
+            }
             if (!cacheLocalFaixas[hora][nome]) {
                 cacheLocalFaixas[hora][nome] = { meta: 0, prod: 0 };
             }
@@ -4825,6 +5305,451 @@ function configurarAcoesKpisModal() {
     });
 }
 
+function configurarCliqueKpiImprodTabelaGeral() {
+    const card = kpiB?.closest(".kpi");
+    if (!card || card.dataset.improdClickBound === "1") return;
+    card.dataset.improdClickBound = "1";
+    card.classList.add("kpi-click-improd");
+    card.title = "Abrir detalhes de improdutividade";
+    card.addEventListener("click", (event) => {
+        if (modoTabela === "geral") abrirModalImprodTabelaGeral(event);
+    });
+}
+
+function obterDatasAnaliseImprod() {
+    if (modoTabela === "geral" && periodoFiltroAtivo()) {
+        return obterDatasFiltroPeriodoAtual(uoSelect?.value || "");
+    }
+    return dataSelect?.value ? [dataSelect.value] : [];
+}
+
+function obterListaAnaliseImprod(nomeLinha = "") {
+    const uo = uoSelect?.value || "";
+    const datas = obterDatasAnaliseImprod();
+    const mapa = new Map();
+
+    datas.forEach((data) => {
+        const faixa = ultimaFaixaDisponivel(uo, data);
+        if (!faixa) return;
+        const listaDia = montarListaEquipesSupervisor(nomeLinha || null, faixa, data, uo, null);
+        listaDia.forEach((item) => {
+            const codigo = String(item.codigo || "").trim();
+            if (!codigo) return;
+            if (!mapa.has(codigo)) {
+                mapa.set(codigo, { ...item, datas: new Set(), improdSoma: 0, servicosSoma: 0 });
+            }
+            const atual = mapa.get(codigo);
+            atual.datas.add(data);
+            atual.improdSoma += toNumber(item.improdutivo);
+            atual.servicosSoma += toNumber(item.servicos);
+        });
+    });
+
+    return [...mapa.values()].map(item => ({
+        ...item,
+        datas: [...item.datas],
+        improdutivo: item.improdSoma,
+        servicos: item.servicosSoma,
+        percImprod: item.servicosSoma > 0 ? (item.improdSoma / item.servicosSoma) * 100 : 0
+    }));
+}
+
+async function coletarCodxAnaliseImprod(lista = [], nomeLinha = "") {
+    const contextoAnterior = currentModalContext;
+    const uo = uoSelect?.value || "";
+    const tipoVisao = tipoSelect?.value || "";
+    const saida = [];
+
+    for (const data of obterDatasAnaliseImprod()) {
+        const codigosData = new Set(
+            lista.filter(item => !item.datas?.length || item.datas.includes(data)).map(item => String(item.codigo))
+        );
+        currentModalContext = {
+            tipoModal: "analise-improd",
+            supervisor: nomeLinha || "",
+            horaClicada: ultimaFaixaDisponivel(uo, data) || "",
+            data,
+            uo,
+            tipoVisao,
+            listaAtual: lista
+        };
+
+        for (const item of lista) {
+            const codigo = String(item.codigo || "").trim();
+            if (!codigo || !codigosData.has(codigo)) continue;
+            const rows = await obterInterferenciasCodXEquipe(codigo);
+            rows.forEach(row => {
+                saida.push({
+                    data,
+                    codigo,
+                    equipe: item.equipe || "-",
+                    codigoX: row.codigoX || "-",
+                    descricao: row.descricao || "-",
+                    tempoMin: Number(row.tempoMin || 0),
+                    obs: row.obs || "-"
+                });
+            });
+        }
+    }
+
+    currentModalContext = contextoAnterior;
+    return saida;
+}
+
+function coletarJustificativasAnaliseImprod(lista = [], nomeLinha = "") {
+    const uo = uoSelect?.value || "";
+    const tipoVisao = tipoSelect?.value || "";
+    const saida = [];
+
+    obterDatasAnaliseImprod().forEach((data) => {
+        const ctx = {
+            data,
+            uo,
+            tipoVisao,
+            supervisor: nomeLinha || "",
+            listaAtual: lista
+        };
+        const mapa = obterMapaJustificativasPainel(ctx);
+        lista.forEach(item => {
+            const codigo = String(item.codigo || "").trim();
+            const just = mapa[codigo];
+            if (!just) return;
+            const texto = String(just.justificativa || "");
+            const parsed = parseJustificativaEstruturada(texto);
+            const grupo = String(just.motivoGrupo || parsed.grupo || extrairMotivoJustificativa(texto) || "-").toUpperCase();
+            const descricao = String(just.motivoDescricao || parsed.descricao || "-").toUpperCase();
+            saida.push({
+                data,
+                codigo,
+                equipe: item.equipe || "-",
+                grupo,
+                descricao,
+                detalhe: String(just.detalhe || parsed.detalhe || texto || "-"),
+                salvoEm: String(just.salvoEm || "")
+            });
+        });
+    });
+
+    return saida;
+}
+
+function renderizarGraficoAnaliseImprod(lista, key, titulo = "TOP 10 PERDAS EM US INTERFERÊNCIAS", valorKey = "") {
+    if (!analiseImprodChart) return;
+    const contagem = new Map();
+    lista.forEach(item => {
+        const valor = String(item[key] || "-").trim() || "-";
+        const incremento = valorKey ? Number(item[valorKey] || 0) : 1;
+        contagem.set(valor, (contagem.get(valor) || 0) + incremento);
+    });
+    const entriesBase = [...contagem.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "pt-BR"));
+    const totalGeral = entriesBase.reduce((acc, [, value]) => acc + Number(value || 0), 0);
+    const entries = totalGeral > 0 ? [["TOTAL GERAL", totalGeral], ...entriesBase] : entriesBase;
+    if (!entries.length) {
+        analiseImprodChart.innerHTML = `<div class="analise-improd-empty">Sem dados para exibir.</div>`;
+        return;
+    }
+    const max = Math.max(...entries.map(([, v]) => v), 1);
+    const alturaMax = 190;
+    const categorias = Math.max(entries.length - 1, 0);
+    analiseImprodChart.innerHTML = `
+        <div class="analise-col-chart">
+            <div class="analise-chart-head">
+                <div>
+                    <span>Distribuição</span>
+                    <strong>${escapeHtml(titulo)}</strong>
+                </div>
+                <div class="analise-chart-summary">
+                    <b>${fmt2(totalGeral).replace(".00", "")}</b>
+                    <small>Total</small>
+                </div>
+                <div class="analise-chart-summary">
+                    <b>${categorias}</b>
+                    <small>Categorias</small>
+                </div>
+                <div class="analise-chart-summary analise-alert-card">
+                    <b>${Number(currentAnaliseImprod?.eqDSemCodx || 0)}</b>
+                    <small>Eq. D sem Código X</small>
+                </div>
+            </div>
+            <div class="analise-col-plot" style="--cols:${entries.length}">
+                ${entries.map(([label, value]) => {
+                    const h = Math.max(8, Math.round((Number(value || 0) / max) * alturaMax));
+                    const isTotal = String(label).toUpperCase() === "TOTAL GERAL";
+                    return `
+                    <div class="analise-col-item ${isTotal ? "is-total" : ""}" title="${escapeHtml(label)}: ${fmt2(value)}">
+                        <strong>${fmt2(value).replace(".00", "")}</strong>
+                        <span style="height:${h}px"></span>
+                    </div>`;
+                }).join("")}
+            </div>
+            <div class="analise-col-axis" style="--cols:${entries.length}">
+                ${entries.map(([label]) => `<div>${escapeHtml(label)}</div>`).join("")}
+            </div>
+        </div>
+    `;
+}
+
+function calcularEqDSemCodxAnalise(listaEquipes = [], codx = []) {
+    const codigosComCodx = new Set(codx.map(item => String(item.codigo || "").trim()).filter(Boolean));
+    return listaEquipes.filter(item => {
+        const codigo = String(item.codigo || "").trim();
+        const faixa = String(item.faixaDiaCompleta || item.faixaDia || "").toUpperCase();
+        return codigo && faixa === "D" && !codigosComCodx.has(codigo);
+    }).length;
+}
+
+function calcularUsPerdaAnalisePorEquipe(codigo, datas = []) {
+    const datasSet = new Set(datas || []);
+    return currentImprodTabelaGeralLinhas
+        .filter(item => String(item.codigo || "") === String(codigo || ""))
+        .filter(item => !datasSet.size || datasSet.has(String(item.dataISO || item.data || "")) || datasSet.has(String(dataSelect?.value || "")))
+        .reduce((acc, item) => acc + Number(item.usPerda || 0), 0);
+}
+
+function enriquecerCodxComPerda(codx = [], listaEquipes = []) {
+    const mapaEquipe = new Map(listaEquipes.map(item => [String(item.codigo || ""), item]));
+    return codx.map(item => {
+        const eq = mapaEquipe.get(String(item.codigo || ""));
+        const usPerda = Number(item.usPerda || 0) || Number(eq?.improdutivo || 0) || 1;
+        return { ...item, usPerda };
+    });
+}
+
+function enriquecerJustificativasComPerda(lista = [], listaEquipes = []) {
+    const mapaEquipe = new Map(listaEquipes.map(item => [String(item.codigo || ""), item]));
+    return lista.map(item => {
+        const eq = mapaEquipe.get(String(item.codigo || ""));
+        const usPerda = Number(item.usPerda || 0) || Number(eq?.improdutivo || 0) || 1;
+        return { ...item, usPerda };
+    });
+}
+
+function renderizarAnaliseImprod() {
+    const visao = currentAnaliseImprod.visao || "codx";
+    btnAnaliseCodx?.classList.toggle("active", visao === "codx");
+    btnAnaliseJust?.classList.toggle("active", visao === "justificativas");
+    if (modalAnaliseImprodTitulo) modalAnaliseImprodTitulo.innerText = currentAnaliseImprod.titulo || "Análise de Improdutividade";
+    if (modalAnaliseImprodMeta) modalAnaliseImprodMeta.innerText = currentAnaliseImprod.meta || "";
+
+    if (visao === "justificativas") {
+        const listaBase = currentAnaliseImprod.justificativas || [];
+        const lista = obterListaJustificativasAnaliseFiltradaOrdenada();
+        renderizarGraficoAnaliseImprod(lista, "grupo", "JUSTIFICATIVAS POR OCORRÊNCIA");
+        renderizarCabecalhoAnaliseJustificativas(listaBase);
+        if (analiseImprodBody) {
+            analiseImprodBody.innerHTML = lista.length ? lista.map(item => `
+                <tr><td>${escapeHtml(item.data)}</td><td>${escapeHtml(item.codigo)}</td><td>${escapeHtml(item.equipe)}</td><td>${escapeHtml(item.grupo)}</td><td>${escapeHtml(item.descricao)}</td><td>${escapeHtml(item.detalhe)}</td></tr>
+            `).join("") : `<tr><td colspan="6">Nenhuma justificativa encontrada.</td></tr>`;
+        }
+        return;
+    }
+
+    const lista = currentAnaliseImprod.codx || [];
+    renderizarGraficoAnaliseImprod(lista, "codigoX", "CÓDIGOS X POR OCORRÊNCIA");
+    if (analiseImprodHead) {
+        analiseImprodHead.innerHTML = "<th>Data</th><th>Cód. Equipe</th><th>Equipe</th><th>Código X</th><th>Descrição</th><th>Tempo</th><th>Obs.</th>";
+    }
+    if (analiseImprodBody) {
+        analiseImprodBody.innerHTML = lista.length ? lista.map(item => `
+            <tr><td>${escapeHtml(item.data)}</td><td>${escapeHtml(item.codigo)}</td><td>${escapeHtml(item.equipe)}</td><td>${escapeHtml(item.codigoX)}</td><td>${escapeHtml(item.descricao)}</td><td class="col-num">${fmt2(item.tempoMin)}</td><td>${escapeHtml(item.obs)}</td></tr>
+        `).join("") : `<tr><td colspan="7">Nenhum Código X encontrado.</td></tr>`;
+    }
+}
+
+function obterColunasAnaliseJustificativas() {
+    return [
+        { key: "data", label: "Data" },
+        { key: "codigo", label: "Cód. Equipe" },
+        { key: "equipe", label: "Equipe" },
+        { key: "grupo", label: "Grupo" },
+        { key: "descricao", label: "Descrição" },
+        { key: "detalhe", label: "Justificativa" }
+    ];
+}
+
+function renderizarCabecalhoAnaliseJustificativas(listaBase = []) {
+    if (!analiseImprodHead) return;
+    const colunas = obterColunasAnaliseJustificativas();
+    analiseImprodHead.innerHTML = colunas.map((coluna) => {
+        const ativo = analiseJustificativasOrdenacao.key === coluna.key;
+        const indicador = ativo ? (analiseJustificativasOrdenacao.direcao === "asc" ? "↑" : "↓") : "↕";
+        const valores = [...new Set(listaBase.map(item => String(item[coluna.key] ?? "").trim()).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" }));
+        const filtroAtual = String(analiseJustificativasFiltros[coluna.key] || "");
+
+        return `
+            <th class="analise-filter-th">
+                <button type="button" class="analise-sort-btn" onclick="ordenarAnaliseJustificativas('${coluna.key}')">
+                    <span>${escapeHtml(coluna.label)}</span>
+                    <span class="sort-indicator">${indicador}</span>
+                </button>
+                <select class="analise-filter-select" onchange="filtrarAnaliseJustificativas('${coluna.key}', this.value)" title="Filtrar ${escapeHtml(coluna.label)}">
+                    <option value="">Todos</option>
+                    ${valores.map(valor => `<option value="${escapeHtml(valor)}"${valor === filtroAtual ? " selected" : ""}>${escapeHtml(valor)}</option>`).join("")}
+                </select>
+            </th>
+        `;
+    }).join("");
+}
+
+function obterListaJustificativasAnaliseFiltradaOrdenada() {
+    const filtros = Object.entries(analiseJustificativasFiltros).filter(([, valor]) => String(valor || "").trim());
+    let lista = [...(currentAnaliseImprod.justificativas || [])];
+
+    if (filtros.length) {
+        lista = lista.filter(item =>
+            filtros.every(([key, valor]) => String(item[key] ?? "").trim() === String(valor).trim())
+        );
+    }
+
+    const { key, direcao } = analiseJustificativasOrdenacao;
+    if (key) {
+        const fator = direcao === "desc" ? -1 : 1;
+        lista.sort((a, b) => String(a[key] ?? "").localeCompare(String(b[key] ?? ""), "pt-BR", {
+            numeric: true,
+            sensitivity: "base"
+        }) * fator);
+    }
+
+    return lista;
+}
+
+function ordenarAnaliseJustificativas(key) {
+    if (analiseJustificativasOrdenacao.key === key) {
+        analiseJustificativasOrdenacao.direcao = analiseJustificativasOrdenacao.direcao === "asc" ? "desc" : "asc";
+    } else {
+        analiseJustificativasOrdenacao = { key, direcao: "asc" };
+    }
+    renderizarAnaliseImprod();
+}
+
+function filtrarAnaliseJustificativas(key, valor) {
+    const texto = String(valor || "").trim();
+    if (texto) {
+        analiseJustificativasFiltros[key] = texto;
+    } else {
+        delete analiseJustificativasFiltros[key];
+    }
+    renderizarAnaliseImprod();
+}
+
+function trocarVisaoAnaliseImprod(visao) {
+    currentAnaliseImprod.visao = visao === "justificativas" ? "justificativas" : "codx";
+    renderizarAnaliseImprod();
+}
+
+async function abrirModalAnaliseImprod(nomeLinha = "", event = null) {
+    if (event?.stopPropagation) event.stopPropagation();
+    if (!modalAnaliseImprod) return;
+    modalAnaliseImprod.classList.remove("hidden");
+    if (analiseImprodBody) analiseImprodBody.innerHTML = `<tr><td colspan="7">Carregando...</td></tr>`;
+    if (analiseImprodChart) analiseImprodChart.innerHTML = `<div class="analise-improd-empty">Carregando...</div>`;
+
+    const lista = obterListaAnaliseImprod(nomeLinha);
+    const rotulo = nomeLinha ? rotuloGrupoExibicao(nomeLinha) : "TOTAL GERAL";
+    currentAnaliseImprod = {
+        visao: "codx",
+        codx: [],
+        justificativas: [],
+        titulo: `Análise Med. Improd. - ${rotulo}`,
+        meta: `${obterRotuloPeriodoFiltroAtual()} | UO: ${uoSelect?.value || "Todas"} | Equipes: ${lista.length}`,
+        eqDSemCodx: 0
+    };
+
+    const [codxRaw, justificativasRaw] = await Promise.all([
+        coletarCodxAnaliseImprod(lista, nomeLinha),
+        Promise.resolve(coletarJustificativasAnaliseImprod(lista, nomeLinha))
+    ]);
+    currentAnaliseImprod.codx = enriquecerCodxComPerda(codxRaw, lista);
+    currentAnaliseImprod.justificativas = enriquecerJustificativasComPerda(justificativasRaw, lista);
+    currentAnaliseImprod.eqDSemCodx = calcularEqDSemCodxAnalise(lista, currentAnaliseImprod.codx);
+    currentAnaliseImprod.meta = `${currentAnaliseImprod.meta} | Eq. D sem Código X: ${currentAnaliseImprod.eqDSemCodx}`;
+    analiseJustificativasFiltros = {};
+    analiseJustificativasOrdenacao = { key: "", direcao: "asc" };
+    renderizarAnaliseImprod();
+}
+
+function fecharModalAnaliseImprod() {
+    modalAnaliseImprod?.classList.add("hidden");
+    modalAnaliseImprod?.classList.remove("fullscreen");
+    if (btnFullscreenAnaliseImprod) btnFullscreenAnaliseImprod.innerText = "Expandir";
+}
+
+function toggleFullscreenAnaliseImprod() {
+    if (!modalAnaliseImprod) return;
+    modalAnaliseImprod.classList.toggle("fullscreen");
+    if (btnFullscreenAnaliseImprod) {
+        btnFullscreenAnaliseImprod.innerText = modalAnaliseImprod.classList.contains("fullscreen")
+            ? "Reduzir"
+            : "Expandir";
+    }
+}
+
+async function baixarModalAnaliseImprodImagem() {
+    if (!modalAnaliseImprod || modalAnaliseImprod.classList.contains("hidden")) return;
+
+    try {
+        await garantirHtml2Canvas();
+    } catch {
+        alert("Não foi possível carregar o gerador de imagem.");
+        return;
+    }
+
+    const conteudo = modalAnaliseImprod.querySelector(".modal-analise-improd");
+    if (!conteudo) {
+        alert("Conteúdo do modal não encontrado.");
+        return;
+    }
+
+    const wrapper = document.createElement("div");
+    wrapper.style.position = "fixed";
+    wrapper.style.top = "-9999px";
+    wrapper.style.left = "-9999px";
+    wrapper.style.zIndex = "99999";
+    wrapper.style.background = "#ffffff";
+    wrapper.style.color = "#111827";
+    wrapper.style.padding = "18px";
+    wrapper.style.overflow = "visible";
+    wrapper.style.width = "auto";
+
+    const clone = conteudo.cloneNode(true);
+    clone.style.width = "max-content";
+    clone.style.maxWidth = "none";
+    clone.style.maxHeight = "none";
+    clone.style.height = "auto";
+    clone.style.overflow = "visible";
+    clone.querySelector(".modal-header-actions")?.remove();
+    clone.querySelectorAll(".analise-improd-grid, .table-wrap, .modal-table-wrap, .analise-improd-chart").forEach(el => {
+        el.style.maxHeight = "none";
+        el.style.overflow = "visible";
+    });
+    clone.querySelectorAll("th").forEach(th => {
+        th.style.position = "relative";
+        th.style.top = "auto";
+        th.style.zIndex = "1";
+    });
+
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
+    html2canvas(wrapper, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        scrollX: 0,
+        scrollY: 0
+    }).then(canvas => {
+        const link = document.createElement("a");
+        link.download = "analise-med-improd.png";
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+    }).catch(() => {
+        alert("Não foi possível gerar a imagem da análise.");
+    }).finally(() => {
+        wrapper.remove();
+    });
+}
+
 function controlarVisibilidadeKpisModal(mostrar) {
     const blocoKpis = document.getElementById("kpisModalEquipes");
     if (!blocoKpis) return;
@@ -5323,8 +6248,15 @@ function montarListaEquipesSupervisor(supervisor, horaClicada, data, uo, codigos
         if (!mapa[cod]) {
             mapa[cod] = montarLinhaResumoEquipePadrao();
             mapa[cod].codigo = cod;
+            mapa[cod].supervisor = String(l[campoGlobal] || "N/I").trim();
             mapa[cod].frota = obterFrotaLinha(l);
-            mapa[cod].equipe = l["Nome"] || "-";
+            mapa[cod].equipe = obterValorColuna(l, ["Nome", "NOME_EQUIPE", "NOME", "EQUIPE"]) || "-";
+            mapa[cod].tipoEquipe =
+                obterValorColuna(l, ["TIPO_EQUIPE", "TIPO EQUIPE", "TIPO", "TIPO_VEICULO", "TIPO VEICULO", "MODALIDADE", "PERFIL_EQUIPE"]) ||
+                obterValorColunaPorFragmentos(l, ["tipo", "equipe"]) ||
+                obterValorColunaPorFragmentos(l, ["tipo", "veiculo"]) ||
+                "";
+            mapa[cod].marcadorOperacional = obterMarcadorOperacionalLinha(l);
         }
 
         mapa[cod].faixas[hora] = String(l["Classificação"] || "-").toUpperCase() || "-";
@@ -5431,7 +6363,8 @@ function montarListaEquipesPorFiltro(nomeLinha, faixaClicada, horaClicada, data,
 
 async function carregarMapaLoteProdTabelaGeral(data) {
     const dataRef = String(data || "").trim();
-    if (!dataRef) return new Map();
+    const vazio = { porCodigo: new Map(), porSupervisor: new Map() };
+    if (!dataRef) return vazio;
     if (cacheLoteProdEquipesTabelaGeral.has(dataRef)) {
         return cacheLoteProdEquipesTabelaGeral.get(dataRef);
     }
@@ -5446,41 +6379,51 @@ async function carregarMapaLoteProdTabelaGeral(data) {
 
         const payload = await resp.json();
         const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-        const mapa = new Map();
+        const porCodigo = new Map();
+        const porSupervisor = new Map();
 
         rows.forEach((row) => {
             const codigo = String(row?.COD_EQUIPE ?? row?.cod_equipe ?? "").trim();
             if (!codigo) return;
 
-            const atual = mapa.get(codigo) || { prod: 0, meta: 0 };
-            atual.prod += toNumber(row?.VALOR_US ?? row?.valor_us ?? 0);
-            atual.meta += toNumber(row?.META ?? row?.meta ?? 0);
-            mapa.set(codigo, atual);
+            const prod = toNumber(row?.VALOR_US ?? row?.valor_us ?? 0);
+            const meta = toNumber(row?.META ?? row?.meta ?? 0);
+            const supervisor = normalizarChaveLoteSupervisor(row?.NOME_SUPERVISOR ?? row?.nome_supervisor ?? "");
+
+            const atualCodigo = porCodigo.get(codigo) || { prod: 0, meta: 0 };
+            atualCodigo.prod += prod;
+            atualCodigo.meta += meta;
+            porCodigo.set(codigo, atualCodigo);
+
+            if (supervisor) {
+                const atualSupervisor = porSupervisor.get(supervisor) || { prod: 0, meta: 0, codigos: new Set() };
+                atualSupervisor.prod += prod;
+                atualSupervisor.meta += meta;
+                atualSupervisor.codigos.add(codigo);
+                porSupervisor.set(supervisor, atualSupervisor);
+            }
         });
 
+        const mapa = { porCodigo, porSupervisor };
         cacheLoteProdEquipesTabelaGeral.set(dataRef, mapa);
         return mapa;
     } catch (error) {
         console.error("Erro ao carregar lote produtivo da Tabela Geral:", error);
-        const mapa = new Map();
-        cacheLoteProdEquipesTabelaGeral.set(dataRef, mapa);
-        return mapa;
+        cacheLoteProdEquipesTabelaGeral.set(dataRef, vazio);
+        return vazio;
     }
 }
 
-function resumirLoteProdPorCodigos(codigos = [], mapaLote = new Map()) {
-    let prod = 0;
-    let meta = 0;
-    let temLote = false;
+function normalizarChaveLoteSupervisor(valor) {
+    return String(valor || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toUpperCase();
+}
 
-    codigos.forEach((codigo) => {
-        const item = mapaLote.get(String(codigo || "").trim());
-        if (!item) return;
-        temLote = true;
-        prod += toNumber(item.prod);
-        meta += toNumber(item.meta);
-    });
-
+function montarResumoLoteProd(prod, meta, temLote = false) {
     return {
         temLote,
         prod,
@@ -5490,8 +6433,46 @@ function resumirLoteProdPorCodigos(codigos = [], mapaLote = new Map()) {
     };
 }
 
+function resumirLoteProdPorSupervisor(supervisor, mapaLote = { porSupervisor: new Map() }) {
+    const item = mapaLote.porSupervisor?.get(normalizarChaveLoteSupervisor(supervisor));
+    if (!item) return montarResumoLoteProd(0, 0, false);
+    return montarResumoLoteProd(toNumber(item.prod), toNumber(item.meta), true);
+}
+
+function resumirLoteProdPeriodoPorSupervisor(supervisor, datasPeriodo = [], mapasLotePorData = {}) {
+    let prod = 0;
+    let meta = 0;
+    let temLote = false;
+
+    datasPeriodo.forEach((data) => {
+        const item = mapasLotePorData[data]?.porSupervisor?.get(normalizarChaveLoteSupervisor(supervisor));
+        if (!item) return;
+        temLote = true;
+        prod += toNumber(item.prod);
+        meta += toNumber(item.meta);
+    });
+
+    return montarResumoLoteProd(prod, meta, temLote);
+}
+
+function resumirLoteProdPorCodigos(codigos = [], mapaLote = { porCodigo: new Map() }) {
+    let prod = 0;
+    let meta = 0;
+    let temLote = false;
+
+    codigos.forEach((codigo) => {
+        const item = mapaLote.porCodigo?.get(String(codigo || "").trim());
+        if (!item) return;
+        temLote = true;
+        prod += toNumber(item.prod);
+        meta += toNumber(item.meta);
+    });
+
+    return montarResumoLoteProd(prod, meta, temLote);
+}
+
 function formatarProdLoteTabelaGeral(valor) {
-    return fmt3(toNumber(valor) / 1000);
+    return fmtDecBR(toNumber(valor) / 100, 2);
 }
 
 function renderBotaoAcordoLinha(equipe, podeMarcar, ctx) {
@@ -5984,7 +6965,9 @@ async function aplicarTabelaGeral() {
             .map(obterCodigoEquipeLinha)
             .filter(Boolean)
     );
-    const usarLoteTabelaGeral = [...codigosTabelaGeral].some((codigo) => mapaLoteProd.has(String(codigo)));
+    const usarLoteTabelaGeral = modoTabela === "semanal" || modoTabela === "mensal" ||
+        [...codigosTabelaGeral].some((codigo) => mapaLoteProd.porCodigo?.has(String(codigo))) ||
+        (mapaLoteProd.porSupervisor?.size || 0) > 0;
 
     montarCabecalhoGeral(tipo, usarLoteTabelaGeral);
 
@@ -6073,10 +7056,7 @@ async function aplicarTabelaGeral() {
             if (!codigo) return;
             item.servicosDesignados = Number(mapaServicosDesignados[codigo] || 0);
         });
-        const resumoLote = resumirLoteProdPorCodigos(
-            listaEquipes.map((item) => item.codigo),
-            mapaLoteProd
-        );
+        const resumoLote = resumirLoteProdPorSupervisor(nome, mapaLoteProd);
         const totalEqLinha = listaEquipes.length;
         const mediaServicosDesignados = mediaNumerica(listaEquipes.map(item => toNumber(item.servicosDesignados)));
         const mediaServicos = mediaNumerica(listaEquipes.map(item => toNumber(item.servicos)));
@@ -6102,6 +7082,13 @@ async function aplicarTabelaGeral() {
             (acc, item) => acc + toNumber(item.improdutivo),
             0
         );
+        const operacionaisLista = calcularKpisOperacionaisTabelaGeral(listaEquipes);
+        const contagemOperacionais = calcularKpisOperacionaisLinhasTabelaGeral({ data, uo, nome, hora: faixaAtual });
+        const operacionais = {
+            ...operacionaisLista,
+            motos: contagemOperacionais.motos,
+            multis: contagemOperacionais.multis
+        };
         const mediaInicioJornadaMin = mediaNumerica(
             listaEquipes
                 .map(item => horaTextoParaMinutos(item.inicioJornada))
@@ -6149,6 +7136,7 @@ async function aplicarTabelaGeral() {
             totalServicosExecutados,
             totalServicosProdutivos,
             totalServicosImprodutivos,
+            operacionais,
             mediaServicosDesignados,
             mediaServicos,
             mediaProdutivos,
@@ -6186,7 +7174,10 @@ async function aplicarTabelaGeral() {
             totalServicosDesignados: item.totalServicosDesignados,
             totalServicosExecutados: item.totalServicosExecutados,
             totalServicosProdutivos: item.totalServicosProdutivos,
-            totalServicosImprodutivos: item.totalServicosImprodutivos
+            totalServicosImprodutivos: item.totalServicosImprodutivos,
+            loteProd: item.prodLote,
+            loteMeta: item.metaLote,
+            operacionais: item.operacionais
         };
 
         linhasHtml.push(`
@@ -6197,6 +7188,7 @@ async function aplicarTabelaGeral() {
             <td class="faixa-${item.faixaDia}">${item.faixaDia}</td>
             <td>${item.metaDia > 0 ? `${item.percProdDia.toFixed(2)}%` : "-"}</td>
             ${usarLoteTabelaGeral ? `
+                <td>${formatarProdLoteTabelaGeral(item.metaLote)}</td>
                 <td>${formatarProdLoteTabelaGeral(item.prodLote)}</td>
                 <td>${item.metaLote > 0 ? `${item.percLote.toFixed(2)}%` : "-"}</td>
                 <td class="faixa-${item.faixaLote}">${item.faixaLote}</td>
@@ -6213,7 +7205,7 @@ async function aplicarTabelaGeral() {
             <td>${fmt2(item.mediaServicosDesignados)}</td>
             <td>${fmt2(item.mediaServicos)}</td>
             <td>${fmt2(item.mediaProdutivos)}</td>
-            <td class="${item.mediaImprodutivos > 20 ? "improd-alta" : ""}">${fmt2(item.mediaImprodutivos)}%</td>
+            <td class="improd-analise-click ${item.mediaImprodutivos > 20 ? "improd-alta" : ""}" onclick="abrirModalAnaliseImprod('${nomeEsc}', event)">${fmt2(item.mediaImprodutivos)}%</td>
             <td>${minutosParaHoraTexto(item.mediaInicioJornadaMin)}</td>
             <td>${minutosParaHoraTexto(item.mediaPrimeiroAtendMin)}</td>
             <td>${minutosParaHoraTexto(item.mediaUltimoAtendMin)}</td>
@@ -6272,6 +7264,13 @@ async function aplicarTabelaGeral() {
             .map(item => horaTextoParaMinutos(item.jornadaProd))
             .filter(v => Number.isFinite(v))
     );
+    const operacionaisListaGeral = calcularKpisOperacionaisTabelaGeral(listaTotalEquipes);
+    const contagemOperacionaisGeral = calcularKpisOperacionaisLinhasTabelaGeral({ data, uo, hora: faixaAtual });
+    const operacionaisGeral = {
+        ...operacionaisListaGeral,
+        motos: contagemOperacionaisGeral.motos,
+        multis: contagemOperacionaisGeral.multis
+    };
 
     currentTabelaGeralResumo.total = {
         metaDia: totalMeta,
@@ -6281,6 +7280,9 @@ async function aplicarTabelaGeral() {
         totalServicosExecutados: totalServicosExecutadosGeral,
         totalServicosProdutivos: totalServicosProdutivosGeral,
         totalServicosImprodutivos: totalServicosImprodutivosGeral,
+        loteProd: totalProdLote,
+        loteMeta: totalMetaLote,
+        operacionais: operacionaisGeral,
         mediaServicosDesignados: mediaServicosDesignadosGeral,
         mediaServicos: mediaServicosGeral,
         mediaProdutivos: mediaProdutivosGeral,
@@ -6299,6 +7301,7 @@ async function aplicarTabelaGeral() {
         <td class="faixa-${classificar(totalMeta > 0 ? (totalProd / totalMeta) * 100 : 0)}">${classificar(totalMeta > 0 ? (totalProd / totalMeta) * 100 : 0)}</td>
         <td>${totalMeta > 0 ? `${((totalProd / totalMeta) * 100).toFixed(2)}%` : "-"}</td>
         ${usarLoteTabelaGeral ? `
+            <td>${formatarProdLoteTabelaGeral(totalMetaLote)}</td>
             <td>${formatarProdLoteTabelaGeral(totalProdLote)}</td>
             <td>${totalMetaLote > 0 ? `${((totalProdLote / totalMetaLote) * 100).toFixed(2)}%` : "-"}</td>
             <td class="faixa-${totalMetaLote > 0 ? classificar((totalProdLote / totalMetaLote) * 100) : "-"}">${totalMetaLote > 0 ? classificar((totalProdLote / totalMetaLote) * 100) : "-"}</td>
@@ -6315,7 +7318,7 @@ async function aplicarTabelaGeral() {
         <td>${fmt2(mediaServicosDesignadosGeral)}</td>
         <td>${fmt2(mediaServicosGeral)}</td>
         <td>${fmt2(mediaProdutivosGeral)}</td>
-        <td class="${mediaImprodutivosGeral > 20 ? "improd-alta" : ""}">${fmt2(mediaImprodutivosGeral)}%</td>
+        <td class="improd-analise-click ${mediaImprodutivosGeral > 20 ? "improd-alta" : ""}" onclick="abrirModalAnaliseImprod('', event)">${fmt2(mediaImprodutivosGeral)}%</td>
         <td>${minutosParaHoraTexto(mediaInicioJornadaGeral)}</td>
         <td>${minutosParaHoraTexto(mediaPrimeiroAtendGeral)}</td>
         <td>${minutosParaHoraTexto(mediaUltimoAtendGeral)}</td>
@@ -6347,7 +7350,7 @@ async function aplicarTabelaGeralPeriodo() {
     const campo = obterCampoPorTipo(tipo);
     const datasPeriodo = obterDatasFiltroPeriodoAtual(uo);
 
-    montarCabecalhoGeral(tipo);
+    montarCabecalhoGeral(tipo, true);
 
     if (!datasPeriodo.length) {
         limparTelaSemDados(tipo, "Nenhum dado para o período selecionado");
@@ -6365,31 +7368,17 @@ async function aplicarTabelaGeralPeriodo() {
     }
 
     const mapasDesignadosPorData = {};
+    const mapasLotePorData = {};
     await Promise.all(datasPeriodo.map(async (data) => {
         try {
             mapasDesignadosPorData[data] = await carregarResumoControleServicoDesignados(data, uo);
         } catch (_) {
             mapasDesignadosPorData[data] = {};
         }
+        mapasLotePorData[data] = await carregarMapaLoteProdTabelaGeral(data);
     }));
 
-    const obterMetricasListaPeriodo = (nome = "") => {
-        const listaPeriodo = [];
-
-        datasPeriodo.forEach((data) => {
-            const faixaAtualData = ultimaFaixaDisponivel(uo, data);
-            if (!faixaAtualData) return;
-
-            const listaDia = montarListaEquipesSupervisor(nome, faixaAtualData, data, uo);
-            listaDia.forEach((item) => {
-                const codigo = String(item.codigo || "").trim();
-                listaPeriodo.push({
-                    ...item,
-                    servicosDesignados: codigo ? Number(mapasDesignadosPorData[data]?.[codigo] || 0) : 0
-                });
-            });
-        });
-
+    const calcularMetricasListaPeriodo = (listaPeriodo = []) => {
         const totalExecutados = listaPeriodo.reduce((acc, item) => acc + toNumber(item.servicos), 0);
         const totalImprodutivos = listaPeriodo.reduce((acc, item) => acc + toNumber(item.improdutivo), 0);
 
@@ -6398,6 +7387,7 @@ async function aplicarTabelaGeralPeriodo() {
             mediaServicos: mediaNumerica(listaPeriodo.map(item => toNumber(item.servicos))),
             mediaProdutivos: mediaNumerica(listaPeriodo.map(item => toNumber(item.produtivo))),
             mediaImprodutivos: totalExecutados > 0 ? (totalImprodutivos / totalExecutados) * 100 : 0,
+            operacionais: calcularKpisOperacionaisTabelaGeral(listaPeriodo),
             mediaInicioJornada: mediaNumerica(listaPeriodo.map(item => horaTextoParaMinutos(item.inicioJornada)).filter(v => Number.isFinite(v))),
             mediaPrimeiroAtend: mediaNumerica(listaPeriodo.map(item => horaTextoParaMinutos(item.primeiroAtend)).filter(v => Number.isFinite(v))),
             mediaUltimoAtend: mediaNumerica(listaPeriodo.map(item => horaTextoParaMinutos(item.ultimoAtend)).filter(v => Number.isFinite(v))),
@@ -6409,10 +7399,45 @@ async function aplicarTabelaGeralPeriodo() {
         };
     };
 
+    const listaPeriodoGeral = [];
+    const listasPeriodoPorSupervisor = new Map();
+
+    datasPeriodo.forEach((data) => {
+        const faixaAtualData = ultimaFaixaDisponivel(uo, data);
+        if (!faixaAtualData) return;
+
+        const listaDia = montarListaEquipesSupervisor("", faixaAtualData, data, uo);
+        listaDia.forEach((item) => {
+            const codigo = String(item.codigo || "").trim();
+            const supervisorItem = String(item.supervisor || "N/I").trim() || "N/I";
+            const itemPeriodo = {
+                ...item,
+                servicosDesignados: codigo ? Number(mapasDesignadosPorData[data]?.[codigo] || 0) : 0
+            };
+            listaPeriodoGeral.push(itemPeriodo);
+            if (!listasPeriodoPorSupervisor.has(supervisorItem)) {
+                listasPeriodoPorSupervisor.set(supervisorItem, []);
+            }
+            listasPeriodoPorSupervisor.get(supervisorItem).push(itemPeriodo);
+        });
+    });
+
+    const metricasPeriodoPorSupervisor = new Map();
+    listasPeriodoPorSupervisor.forEach((lista, supervisor) => {
+        metricasPeriodoPorSupervisor.set(supervisor, calcularMetricasListaPeriodo(lista));
+    });
+    const metricasPeriodoTotal = calcularMetricasListaPeriodo(listaPeriodoGeral);
+
+    const obterMetricasListaPeriodo = (nome = "") => {
+        if (!nome) return metricasPeriodoTotal;
+        return metricasPeriodoPorSupervisor.get(String(nome).trim()) || calcularMetricasListaPeriodo([]);
+    };
+
     const linhasHtml = [];
     let totalMeta = 0;
     let totalProd = 0;
-    let totalPrevisaoProd = 0;
+    let totalMetaLote = 0;
+    let totalProdLote = 0;
     let totalEqGeral = 0;
 
     currentTabelaGeralResumo = {
@@ -6424,15 +7449,14 @@ async function aplicarTabelaGeralPeriodo() {
         const totalEqLinha = linha.eq.AA + linha.eq.A + linha.eq.B + linha.eq.C + linha.eq.D;
         const percProdDia = Number(linha.meta || 0) > 0 ? (Number(linha.prod || 0) / Number(linha.meta || 0)) * 100 : 0;
         const faixaDia = classificar(percProdDia);
-        const previsaoProd = calcularPrevisaoNotaFinal(linha.prod);
-        const previsaoPercMeta = Number(linha.meta || 0) > 0 ? (previsaoProd / Number(linha.meta || 0)) * 100 : 0;
-        const previsaoFaixa = Number(linha.meta || 0) > 0 ? classificar(previsaoPercMeta) : "-";
+        const resumoLote = resumirLoteProdPeriodoPorSupervisor(linha.nome, datasPeriodo, mapasLotePorData);
         const nomeEsc = escapeJsString(linha.nome);
         const metricas = obterMetricasListaPeriodo(linha.nome);
 
         totalMeta += Number(linha.meta || 0);
         totalProd += Number(linha.prod || 0);
-        totalPrevisaoProd += previsaoProd;
+        totalMetaLote += resumoLote.meta;
+        totalProdLote += resumoLote.prod;
         totalEqGeral += totalEqLinha;
 
         currentTabelaGeralResumo.porSupervisor[linha.nome] = {
@@ -6443,7 +7467,10 @@ async function aplicarTabelaGeralPeriodo() {
             totalServicosDesignados: metricas.totalServicosDesignados,
             totalServicosExecutados: metricas.totalServicosExecutados,
             totalServicosProdutivos: metricas.totalServicosProdutivos,
-            totalServicosImprodutivos: metricas.totalServicosImprodutivos
+            totalServicosImprodutivos: metricas.totalServicosImprodutivos,
+            loteProd: resumoLote.prod,
+            loteMeta: resumoLote.meta,
+            operacionais: metricas.operacionais
         };
 
         linhasHtml.push(`
@@ -6453,14 +7480,15 @@ async function aplicarTabelaGeralPeriodo() {
             <td>${fmt3(linha.prod)}</td>
             <td class="faixa-${faixaDia}">${faixaDia}</td>
             <td>${Number(linha.meta || 0) > 0 ? `${percProdDia.toFixed(2)}%` : "-"}</td>
-            <td>${fmt3(previsaoProd)}</td>
-            <td>${Number(linha.meta || 0) > 0 ? `${previsaoPercMeta.toFixed(2)}%` : "-"}</td>
-            <td class="faixa-${previsaoFaixa}">${previsaoFaixa}</td>
+            <td>${formatarProdLoteTabelaGeral(resumoLote.meta)}</td>
+            <td>${formatarProdLoteTabelaGeral(resumoLote.prod)}</td>
+            <td>${resumoLote.meta > 0 ? `${resumoLote.perc.toFixed(2)}%` : "-"}</td>
+            <td class="faixa-${resumoLote.faixa}">${resumoLote.faixa}</td>
             <td>${fmt2(totalEqLinha)}</td>
             <td>${fmt2(metricas.mediaServicosDesignados)}</td>
             <td>${fmt2(metricas.mediaServicos)}</td>
             <td>${fmt2(metricas.mediaProdutivos)}</td>
-            <td class="${metricas.mediaImprodutivos > 20 ? "improd-alta" : ""}">${fmt2(metricas.mediaImprodutivos)}%</td>
+            <td class="improd-analise-click ${metricas.mediaImprodutivos > 20 ? "improd-alta" : ""}" onclick="abrirModalAnaliseImprod('${nomeEsc}', event)">${fmt2(metricas.mediaImprodutivos)}%</td>
             <td>${minutosParaHoraTexto(metricas.mediaInicioJornada)}</td>
             <td>${minutosParaHoraTexto(metricas.mediaPrimeiroAtend)}</td>
             <td>${minutosParaHoraTexto(metricas.mediaUltimoAtend)}</td>
@@ -6471,8 +7499,8 @@ async function aplicarTabelaGeralPeriodo() {
     const metricasTotal = obterMetricasListaPeriodo("");
     const percTotal = totalMeta > 0 ? (totalProd / totalMeta) * 100 : 0;
     const faixaTotal = classificar(percTotal);
-    const previsaoPercTotal = totalMeta > 0 ? (totalPrevisaoProd / totalMeta) * 100 : 0;
-    const previsaoFaixaTotal = totalMeta > 0 ? classificar(previsaoPercTotal) : "-";
+    const percLoteTotal = totalMetaLote > 0 ? (totalProdLote / totalMetaLote) * 100 : 0;
+    const faixaLoteTotal = totalMetaLote > 0 ? classificar(percLoteTotal) : "-";
 
     currentTabelaGeralResumo.total = {
         metaDia: totalMeta,
@@ -6481,7 +7509,10 @@ async function aplicarTabelaGeralPeriodo() {
         totalServicosDesignados: metricasTotal.totalServicosDesignados,
         totalServicosExecutados: metricasTotal.totalServicosExecutados,
         totalServicosProdutivos: metricasTotal.totalServicosProdutivos,
-        totalServicosImprodutivos: metricasTotal.totalServicosImprodutivos
+        totalServicosImprodutivos: metricasTotal.totalServicosImprodutivos,
+        loteProd: totalProdLote,
+        loteMeta: totalMetaLote,
+        operacionais: metricasTotal.operacionais
     };
 
     linhasHtml.push(`
@@ -6491,14 +7522,15 @@ async function aplicarTabelaGeralPeriodo() {
         <td>${fmt3(totalProd)}</td>
         <td class="faixa-${faixaTotal}">${faixaTotal}</td>
         <td>${totalMeta > 0 ? `${percTotal.toFixed(2)}%` : "-"}</td>
-        <td>${fmt3(totalPrevisaoProd)}</td>
-        <td>${totalMeta > 0 ? `${previsaoPercTotal.toFixed(2)}%` : "-"}</td>
-        <td class="faixa-${previsaoFaixaTotal}">${previsaoFaixaTotal}</td>
+        <td>${formatarProdLoteTabelaGeral(totalMetaLote)}</td>
+        <td>${formatarProdLoteTabelaGeral(totalProdLote)}</td>
+        <td>${totalMetaLote > 0 ? `${percLoteTotal.toFixed(2)}%` : "-"}</td>
+        <td class="faixa-${faixaLoteTotal}">${faixaLoteTotal}</td>
         <td>${fmt2(totalEqGeral)}</td>
         <td>${fmt2(metricasTotal.mediaServicosDesignados)}</td>
         <td>${fmt2(metricasTotal.mediaServicos)}</td>
         <td>${fmt2(metricasTotal.mediaProdutivos)}</td>
-        <td class="${metricasTotal.mediaImprodutivos > 20 ? "improd-alta" : ""}">${fmt2(metricasTotal.mediaImprodutivos)}%</td>
+        <td class="improd-analise-click ${metricasTotal.mediaImprodutivos > 20 ? "improd-alta" : ""}" onclick="abrirModalAnaliseImprod('', event)">${fmt2(metricasTotal.mediaImprodutivos)}%</td>
         <td>${minutosParaHoraTexto(metricasTotal.mediaInicioJornada)}</td>
         <td>${minutosParaHoraTexto(metricasTotal.mediaPrimeiroAtend)}</td>
         <td>${minutosParaHoraTexto(metricasTotal.mediaUltimoAtend)}</td>
@@ -8167,6 +9199,1371 @@ async function carregarControleServico(data, uo, codEquipe) {
     return rows;
 }
 
+function obterPeriodoRc07Atual() {
+    const periodo = String(periodoTabelaSelect?.value || "diario").trim();
+
+    if (periodo === "semanal") {
+        const semana = String(semanaSelect?.value || "").trim();
+        const intervalo = semana ? obterInicioEFimSemanaPorInput(semana) : null;
+        if (intervalo?.inicio && intervalo?.fim) {
+            return { inicio: intervalo.inicio, fim: intervalo.fim, label: `Semana ${formatarDataBR(intervalo.inicio)} a ${formatarDataBR(intervalo.fim)}` };
+        }
+    }
+
+    if (periodo === "mensal") {
+        const anoMes = String(mesSelect?.value || obterAnoMesAtual()).trim();
+        const [ano, mes] = anoMes.split("-").map(Number);
+        if (ano && mes) {
+            const inicio = `${anoMes}-01`;
+            const fim = formatISODateLocal(new Date(ano, mes, 0));
+            return { inicio, fim, label: `Mês ${anoMes}` };
+        }
+    }
+
+    if (periodo === "periodo") {
+        const ini = String(periodoInicioSelect?.value || "").trim();
+        const fimRaw = String(periodoFimSelect?.value || ini).trim();
+        if (ini && fimRaw) {
+            const inicio = ini <= fimRaw ? ini : fimRaw;
+            const fim = ini <= fimRaw ? fimRaw : ini;
+            return { inicio, fim, label: `${formatarDataBR(inicio)} a ${formatarDataBR(fim)}` };
+        }
+    }
+
+    const data = String(dataSelect?.value || "").trim();
+    return { inicio: data, fim: data, label: formatarDataBR(data) || data || "-" };
+}
+
+function obterValorRc07(row, keys) {
+    for (const key of keys) {
+        const value = row?.[key];
+        if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+    }
+    return "";
+}
+
+function normalizarMetaRc07(value) {
+    const numero = parseControleServicoNumero(value);
+    return Number.isFinite(numero) ? fmt3(numero) : "0.000";
+}
+
+function obterNomeEquipeRc07PorCodigo(codigo) {
+    const alvo = String(codigo || "").trim();
+    if (!alvo) return "";
+    const bases = [dadosBase, dados];
+    for (const base of bases) {
+        const linha = (base || []).find((item) => String(obterValorColuna(item, ["Cód. Equipe", "Cód. Equipe", "CÃ³d. Equipe", "CÃƒÂ³d. Equipe", "COD_EQUIPE", "NUM_EQUIPE"]) || "").trim() === alvo);
+        const nome = linha ? obterValorColuna(linha, ["Nome", "NOME_EQUIPE", "NOME", "EQUIPE"]) : "";
+        if (nome) return nome;
+    }
+    return "";
+}
+
+const RC07_FLAGS_KEY = "painel_rc07_flags_v1";
+let rc07SomenteFlegadas = false;
+let rc07UltimaLista = [];
+let rc07UltimoContexto = null;
+let rc07UltimosMarcados = {};
+let rc07UltimosDetalhesMarcados = {};
+let rc07Ordenacao = { coluna: null, direcao: "desc" };
+let rc07FiltrosColunas = {};
+
+function getRc07Flags() {
+    try {
+        return JSON.parse(localStorage.getItem(RC07_FLAGS_KEY) || "{}") || {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function salvarRc07Flags(flags) {
+    localStorage.setItem(RC07_FLAGS_KEY, JSON.stringify(flags || {}));
+}
+
+async function carregarRc07MarcadosBanco(contexto) {
+    const dataRef = String(contexto?.data || "").trim();
+    if (!dataRef) return {};
+
+    const params = new URLSearchParams({
+        data_ref: dataRef,
+        uo: String(contexto?.uo || ""),
+        supervisor: String(contexto?.supervisor || "")
+    });
+
+    const resp = await fetch(`/api/rc07/flags?${params.toString()}`, { cache: "no-store" });
+    const payload = await resp.json().catch(() => ({}));
+    if (!resp.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Erro ao carregar RC07 do banco.");
+    }
+    rc07UltimosDetalhesMarcados = {};
+    (Array.isArray(payload?.rows) ? payload.rows : []).forEach((row) => {
+        const codigo = String(row?.codigo_equipe || "").trim();
+        if (!codigo) return;
+        rc07UltimosDetalhesMarcados[codigo] = {
+            horaReferencia: String(row?.hora_referencia || ""),
+            frota: String(row?.frota || ""),
+            equipe: String(row?.equipe || ""),
+            meta: Number(row?.meta_dia || 0),
+            prod: Number(row?.prod_dia || 0),
+            faixa: String(row?.faixa_dia || "").toUpperCase(),
+            perc: Number(row?.perc_prod || 0)
+        };
+    });
+    return payload?.marcados && typeof payload.marcados === "object" ? payload.marcados : {};
+}
+
+async function salvarRc07FlagBanco(contexto, item, checked) {
+    const horaMomento = normalizarHora(contexto?.hora || "11");
+    const snapshotMomento = obterSnapshotEquipeRc07PorHora(item?.codigo, horaMomento, contexto) || item || {};
+    const prodMomento = Number(snapshotMomento?.prod ?? snapshotMomento?.prodDia ?? 0);
+    const metaMomento = Number(snapshotMomento?.meta ?? snapshotMomento?.metaDia ?? 0);
+    const percMomento = Number(snapshotMomento?.percProdDia ?? (metaMomento > 0 ? (prodMomento / metaMomento) * 100 : 0));
+    const faixaMomento = String(snapshotMomento?.faixaDia || classificar(percMomento) || "-").toUpperCase();
+    const resp = await fetch("/api/rc07/flags/item", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            data_ref: contexto?.data || dataSelect?.value || "",
+            uo: contexto?.uo || "",
+            supervisor: contexto?.supervisor || "",
+            hora_referencia: horaMomento,
+            codigo_equipe: item?.codigo || "",
+            frota: snapshotMomento?.frota || item?.frota || "",
+            equipe: snapshotMomento?.equipe || item?.equipe || "",
+            meta_dia: metaMomento,
+            prod_dia: prodMomento,
+            faixa_dia: faixaMomento,
+            perc_prod: Number.isFinite(percMomento) ? percMomento : 0,
+            checked: Boolean(checked)
+        })
+    });
+    const payload = await resp.json().catch(() => ({}));
+    if (resp.status === 404) {
+        throw new Error("Endpoint RC07 nao encontrado. Reinicie o servidor do painel para carregar a versao atualizada.");
+    }
+    if (!resp.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Erro ao salvar RC07 no banco.");
+    }
+    return payload;
+}
+
+function rc07ContextKey(data, uo, supervisor) {
+    return [String(data || ""), String(uo || ""), String(supervisor || "")].join("|");
+}
+
+function popularFiltrosRc07(dataPadrao, uoPadrao, supervisorPadrao) {
+    if (rc07Data) rc07Data.value = dataPadrao || dataSelect?.value || "";
+
+    if (rc07Uo) {
+        const uos = [...new Set((dadosBase || dados || []).map((linha) => String(obterValorColuna(linha, ["Cód.UO", "CÃ³d.UO", "CÃƒÂ³d.UO", "COD_UO", "UO"]) || "").trim()).filter(Boolean))].sort();
+        rc07Uo.innerHTML = `<option value="">Todas</option>` + uos.map((uo) => `<option value="${escapeHtml(uo)}">${escapeHtml(uo)}</option>`).join("");
+        rc07Uo.value = uoPadrao || uoSelect?.value || "";
+    }
+
+    if (rc07Supervisor) {
+        const dataRef = rc07Data?.value || dataPadrao || dataSelect?.value || "";
+        const uoRef = rc07Uo?.value || uoPadrao || "";
+        const supervisores = [...new Set(obterLinhasPorDataUo(dataRef, uoRef).map((linha) => String(linha[campoGlobal] || "N/I").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+        rc07Supervisor.innerHTML = `<option value="">Todos</option>` + supervisores.map((sup) => `<option value="${escapeHtml(sup)}">${escapeHtml(rotuloGrupoExibicao(sup))}</option>`).join("");
+        if (supervisorPadrao && supervisores.includes(supervisorPadrao)) rc07Supervisor.value = supervisorPadrao;
+    }
+}
+
+function obterEquipesRc07Filtradas() {
+    const data = String(rc07Data?.value || dataSelect?.value || "").trim();
+    const uo = String(rc07Uo?.value || "").trim();
+    const supervisor = String(rc07Supervisor?.value || "").trim();
+    const hora = obterHoraReferenciaModalEquipes(horaSelect?.value || "");
+
+    if (supervisor) {
+        return { data, uo, supervisor, hora, lista: montarListaEquipesSupervisor(supervisor, hora, data, uo, null) };
+    }
+
+    const supervisores = [...new Set(obterLinhasPorDataUo(data, uo).map((linha) => String(linha[campoGlobal] || "N/I").trim()).filter(Boolean))];
+    const mapa = new Map();
+    supervisores.forEach((sup) => {
+        montarListaEquipesSupervisor(sup, hora, data, uo, null).forEach((equipe) => {
+            if (!mapa.has(String(equipe.codigo))) mapa.set(String(equipe.codigo), equipe);
+        });
+    });
+    return { data, uo, supervisor, hora, lista: [...mapa.values()].sort((a, b) => String(a.equipe).localeCompare(String(b.equipe), "pt-BR")) };
+}
+
+function obterListaRc07Visivel(lista, marcados) {
+    if (!rc07SomenteFlegadas) return lista;
+    return (lista || []).filter((item) => marcados?.[String(item.codigo || "").trim()]);
+}
+
+function atualizarEstadoFiltroRc07() {
+    const card = document.getElementById("cardKpiRc07Flegadas");
+    if (card) {
+        card.classList.toggle("ativo", rc07SomenteFlegadas);
+        card.title = rc07SomenteFlegadas ? "Voltar para todas as equipes" : "Mostrar somente equipes flegadas";
+    }
+}
+
+function alternarFiltroRc07Flegadas() {
+    rc07SomenteFlegadas = !rc07SomenteFlegadas;
+    atualizarEstadoFiltroRc07();
+    configurarTabelaRc07Interativa();
+    if (rc07UltimoContexto) {
+        renderizarModalRc07(rc07UltimaLista, rc07UltimoContexto, rc07UltimosMarcados);
+    }
+}
+
+function obterValorColunaRc07(item, coluna, marcados = {}) {
+    const codigo = String(item?.codigo || "").trim();
+    const prodDia = Number(item?.prodDia || 0);
+    const metaDia = Number(item?.metaDia || 0);
+    const percProd = Number(item?.percProdDiaCompleto ?? (metaDia > 0 ? (prodDia / metaDia) * 100 : 0));
+    const faixaDia = String(item?.faixaDiaCompleta || item?.faixaDia || classificar(percProd) || "-").toUpperCase();
+
+    if (coluna === "desg") return marcados?.[codigo] ? "FLEGADA" : "NAO FLEGADA";
+    if (coluna === "codigo") return codigo || "-";
+    if (coluna === "frota") return String(item?.frota || "-");
+    if (coluna === "equipe") return String(item?.equipe || "-");
+    if (coluna === "meta") return metaDia;
+    if (coluna === "prod") return prodDia;
+    if (coluna === "faixa") return faixaDia;
+    if (coluna === "perc") return Number.isFinite(percProd) ? percProd : 0;
+    return "";
+}
+
+function obterTextoFiltroRc07(item, coluna, marcados = {}) {
+    const valor = obterValorColunaRc07(item, coluna, marcados);
+    if (coluna === "meta" || coluna === "prod") return fmt3(Number(valor || 0));
+    if (coluna === "perc") return `${Number(valor || 0).toFixed(2)}%`;
+    return String(valor || "-");
+}
+
+function filtrarOrdenarListaRc07(lista, marcados = {}) {
+    let resultado = [...(lista || [])].filter((item) => {
+        return Object.entries(rc07FiltrosColunas).every(([coluna, selecionados]) => {
+            if (!Array.isArray(selecionados) || !selecionados.length) return true;
+            return selecionados.includes(obterTextoFiltroRc07(item, coluna, marcados));
+        });
+    });
+
+    if (rc07Ordenacao.coluna) {
+        const { coluna, direcao } = rc07Ordenacao;
+        resultado.sort((a, b) => {
+            const valorA = obterValorColunaRc07(a, coluna, marcados);
+            const valorB = obterValorColunaRc07(b, coluna, marcados);
+            let cmp = 0;
+            if (coluna === "meta" || coluna === "prod" || coluna === "perc") {
+                cmp = Number(valorA || 0) - Number(valorB || 0);
+                if ((direcao || "desc") === "desc") cmp = -cmp;
+            } else {
+                cmp = compararValorOrdenacaoModal(valorA, valorB, direcao || "desc");
+            }
+            if (cmp !== 0) return cmp;
+            return String(a?.codigo || "").localeCompare(String(b?.codigo || ""), "pt-BR", { numeric: true });
+        });
+    }
+
+    return resultado;
+}
+
+function atualizarIndicadoresRc07() {
+    document.querySelectorAll(".tabela-rc07 thead th[data-rc07-col]").forEach((th) => {
+        const coluna = th.dataset.rc07Col;
+        const indicador = th.querySelector(".sort-indicator");
+        const filtro = th.querySelector(".filter-pro");
+        const ativoOrdenacao = rc07Ordenacao.coluna === coluna;
+        th.classList.toggle("sort-active", ativoOrdenacao);
+        if (indicador) {
+            indicador.textContent = ativoOrdenacao
+                ? (rc07Ordenacao.direcao === "asc" ? "↑" : "↓")
+                : "↕";
+        }
+        if (filtro) filtro.classList.toggle("ativo", Array.isArray(rc07FiltrosColunas[coluna]));
+    });
+}
+
+function ordenarRc07PorColuna(coluna) {
+    const direcao =
+        rc07Ordenacao.coluna === coluna && rc07Ordenacao.direcao === "desc"
+            ? "asc"
+            : "desc";
+    rc07Ordenacao = { coluna, direcao };
+    renderizarModalRc07(rc07UltimaLista, rc07UltimoContexto, rc07UltimosMarcados);
+}
+
+function abrirFiltroRc07(th, coluna, icon) {
+    document.querySelectorAll(".painel-flutuante").forEach(painel => painel.remove());
+
+    const marcados = rc07UltimosMarcados || {};
+    const valores = [...new Set(
+        obterListaRc07Visivel(rc07UltimaLista, marcados)
+            .map((item) => obterTextoFiltroRc07(item, coluna, marcados))
+            .filter(Boolean)
+    )].sort((a, b) => compararValorOrdenacaoModal(a, b, "asc"));
+
+    const painel = document.createElement("div");
+    painel.className = "painel-flutuante painel-rc07-filtro";
+
+    const busca = document.createElement("input");
+    busca.type = "text";
+    busca.placeholder = "Buscar...";
+    busca.className = "painel-busca";
+
+    const lista = document.createElement("div");
+    lista.className = "painel-lista";
+
+    const footer = document.createElement("div");
+    footer.className = "painel-footer";
+
+    const btnLimpar = document.createElement("button");
+    btnLimpar.textContent = "Limpar";
+    const btnAplicar = document.createElement("button");
+    btnAplicar.textContent = "Aplicar";
+
+    footer.appendChild(btnLimpar);
+    footer.appendChild(btnAplicar);
+    painel.appendChild(busca);
+    painel.appendChild(lista);
+    painel.appendChild(footer);
+    document.body.appendChild(painel);
+
+    const selecionadosAtuais = rc07FiltrosColunas[coluna];
+    const labelTodas = document.createElement("label");
+    labelTodas.className = "painel-item painel-item-todas";
+    const checkboxTodas = document.createElement("input");
+    checkboxTodas.type = "checkbox";
+    checkboxTodas.checked = !selecionadosAtuais || selecionadosAtuais.length === valores.length;
+    labelTodas.appendChild(checkboxTodas);
+    labelTodas.append(" Selecionar todas");
+    lista.appendChild(labelTodas);
+
+    valores.forEach((valor) => {
+        const label = document.createElement("label");
+        label.className = "painel-item";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = valor;
+        checkbox.checked = !selecionadosAtuais || selecionadosAtuais.includes(valor);
+        checkbox.addEventListener("change", () => {
+            const itens = [...lista.querySelectorAll(".painel-item input")].filter(cb => cb !== checkboxTodas);
+            checkboxTodas.checked = itens.every(cb => cb.checked);
+        });
+        label.appendChild(checkbox);
+        label.append(" " + valor);
+        lista.appendChild(label);
+    });
+
+    checkboxTodas.addEventListener("change", () => {
+        lista.querySelectorAll(".painel-item input").forEach(cb => {
+            if (cb !== checkboxTodas) cb.checked = checkboxTodas.checked;
+        });
+    });
+
+    busca.addEventListener("keyup", () => {
+        const termo = busca.value.toLowerCase();
+        lista.querySelectorAll(".painel-item").forEach((item, index) => {
+            item.style.display = index === 0 || item.innerText.toLowerCase().includes(termo) ? "flex" : "none";
+        });
+    });
+
+    btnAplicar.addEventListener("click", () => {
+        const selecionados = [...lista.querySelectorAll(".painel-item input:checked")]
+            .filter(cb => cb !== checkboxTodas)
+            .map(cb => cb.value);
+
+        if (!selecionados.length || selecionados.length === valores.length) delete rc07FiltrosColunas[coluna];
+        else rc07FiltrosColunas[coluna] = selecionados;
+
+        painel.remove();
+        icon.classList.toggle("ativo", Array.isArray(rc07FiltrosColunas[coluna]));
+        renderizarModalRc07(rc07UltimaLista, rc07UltimoContexto, rc07UltimosMarcados);
+    });
+
+    btnLimpar.addEventListener("click", () => {
+        delete rc07FiltrosColunas[coluna];
+        painel.remove();
+        icon.classList.remove("ativo");
+        renderizarModalRc07(rc07UltimaLista, rc07UltimoContexto, rc07UltimosMarcados);
+    });
+
+    const rect = th.getBoundingClientRect();
+    painel.style.top = `${rect.bottom + 4}px`;
+    painel.style.left = `${Math.min(rect.left, window.innerWidth - 280)}px`;
+
+    document.addEventListener("click", function fechar(e) {
+        if (!painel.contains(e.target) && !icon.contains(e.target)) {
+            painel.remove();
+            document.removeEventListener("click", fechar);
+        }
+    });
+}
+
+function configurarTabelaRc07Interativa() {
+    document.querySelectorAll(".tabela-rc07 thead th[data-rc07-col]").forEach((th) => {
+        const coluna = th.dataset.rc07Col;
+        if (!coluna) return;
+
+        if (th.dataset.rc07Bound !== "1") {
+            th.dataset.rc07Bound = "1";
+            th.classList.add("sortable-th", "rc07-filterable-th");
+            th.title = "Clique para ordenar";
+
+            const label = document.createElement("span");
+            label.className = "th-label";
+            label.textContent = th.textContent.trim();
+            th.textContent = "";
+            th.appendChild(label);
+
+            const indicador = document.createElement("span");
+            indicador.className = "sort-indicator";
+            indicador.setAttribute("aria-hidden", "true");
+            indicador.textContent = "↕";
+            th.appendChild(indicador);
+
+            const filtro = document.createElement("span");
+            filtro.className = "filter-pro";
+            filtro.textContent = "▾";
+            filtro.title = "Filtrar coluna";
+            th.appendChild(filtro);
+
+            th.addEventListener("click", () => ordenarRc07PorColuna(coluna));
+            filtro.addEventListener("click", (event) => {
+                event.stopPropagation();
+                abrirFiltroRc07(th, coluna, filtro);
+            });
+        }
+    });
+
+    atualizarIndicadoresRc07();
+}
+
+async function baixarRc07FlegadasImagem() {
+    const lista = obterListaRc07Visivel(rc07UltimaLista, rc07UltimosMarcados)
+        .filter((item) => rc07UltimosMarcados?.[String(item.codigo || "").trim()]);
+
+    if (!lista.length) {
+        alert("Nenhuma equipe flegada para exportar.");
+        return;
+    }
+
+    try {
+        await garantirHtml2Canvas();
+    } catch {
+        alert("Nao foi possivel carregar o gerador de imagem.");
+        return;
+    }
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "rc07-export-wrapper";
+    wrapper.style.position = "fixed";
+    wrapper.style.top = "-9999px";
+    wrapper.style.left = "-9999px";
+    wrapper.style.zIndex = "99999";
+
+    const titulo = document.createElement("div");
+    titulo.className = "rc07-export-title";
+    titulo.textContent = "Equipes Flegadas RC07";
+
+    const subtitulo = document.createElement("div");
+    subtitulo.className = "rc07-export-subtitle";
+    const supTxt = rc07UltimoContexto?.supervisor ? ` | Supervisor: ${rotuloGrupoExibicao(rc07UltimoContexto.supervisor)}` : " | Todos os supervisores";
+    subtitulo.textContent = `${formatarDataBR(rc07UltimoContexto?.data) || rc07UltimoContexto?.data || "-"}${rc07UltimoContexto?.uo ? ` | UO ${rc07UltimoContexto.uo}` : ""}${supTxt}`;
+
+    const tabela = document.createElement("table");
+    tabela.className = "rc07-export-table";
+    tabela.innerHTML = `
+        <thead>
+            <tr>
+                <th>DESG. RC07</th>
+                <th>Cod.Ep.</th>
+                <th>Frota</th>
+                <th>Equipes</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${lista.map((item) => `
+                <tr>
+                    <td>→</td>
+                    <td>${escapeHtml(String(item.codigo || "-"))}</td>
+                    <td>${escapeHtml(String(item.frota || "-"))}</td>
+                    <td>${escapeHtml(String(item.equipe || "-"))}</td>
+                </tr>
+            `).join("")}
+        </tbody>
+    `;
+
+    wrapper.appendChild(titulo);
+    wrapper.appendChild(subtitulo);
+    wrapper.appendChild(tabela);
+    document.body.appendChild(wrapper);
+
+    html2canvas(wrapper, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        scrollX: 0,
+        scrollY: 0
+    }).then((canvas) => {
+        const link = document.createElement("a");
+        const dataArquivo = String(rc07UltimoContexto?.data || obterHojeISO()).replaceAll("-", "");
+        link.download = `rc07-flegadas-${dataArquivo}.png`;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+    }).catch(() => {
+        alert("Nao foi possivel gerar a imagem das equipes flegadas.");
+    }).finally(() => {
+        wrapper.remove();
+    });
+}
+
+function renderizarModalRc07(lista, contexto, marcadosBanco = null) {
+    if (!modalRc07Body) return;
+    const flags = getRc07Flags();
+    const key = rc07ContextKey(contexto?.data, contexto?.uo, contexto?.supervisor);
+    const marcados = marcadosBanco || flags[key] || {};
+    rc07UltimaLista = lista || [];
+    rc07UltimoContexto = contexto || null;
+    rc07UltimosMarcados = { ...marcados };
+    atualizarEstadoFiltroRc07();
+    currentModalContext = {
+        tipoModal: "rc07",
+        data: contexto?.data || dataSelect?.value || "",
+        uo: contexto?.uo || uoSelect?.value || "",
+        supervisor: contexto?.supervisor || "",
+        horaClicada: contexto?.hora || horaSelect?.value || "",
+        listaAtual: lista
+    };
+
+    const listaVisivel = filtrarOrdenarListaRc07(obterListaRc07Visivel(lista, marcados), marcados);
+    const linhas = listaVisivel.map((item) => {
+        const codigo = String(item.codigo || "").trim();
+        const checked = marcados[codigo] ? "checked" : "";
+        const prodDia = Number(item.prodDia || 0);
+        const metaDia = Number(item.metaDia || 0);
+        const percProd = Number(item.percProdDiaCompleto ?? (metaDia > 0 ? (prodDia / metaDia) * 100 : 0));
+        const faixaDia = String(item.faixaDiaCompleta || item.faixaDia || classificar(percProd) || "-").toUpperCase();
+        return `
+            <tr data-codigo="${escapeHtml(codigo)}">
+                <td class="col-rc07-desg">
+                    <input class="rc07-check" type="checkbox" data-codigo="${escapeHtml(codigo)}" ${checked} aria-label="Flegar RC07">
+                </td>
+                <td>${escapeHtml(codigo || "-")}</td>
+                <td>${escapeHtml(String(item.frota || "-"))}</td>
+                <td class="col-equipe">${escapeHtml(String(item.equipe || "-"))}</td>
+                <td>${fmt3(metaDia)}</td>
+                <td>${fmt3(prodDia)}</td>
+                <td class="faixa-${escapeHtml(faixaDia)}">${escapeHtml(faixaDia)}</td>
+                <td>${Number.isFinite(percProd) ? percProd.toFixed(2) : "0.00"}%</td>
+                <td>
+                    <button class="btn-rc07-servicos" type="button" onclick="abrirModalControleServico('${escapeJsString(codigo)}', event)">
+                        Abrir serviços
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join("");
+
+    modalRc07Body.innerHTML = linhas || `<tr><td colspan="9">${rc07SomenteFlegadas ? "Nenhuma equipe flegada encontrada." : "Nenhuma equipe encontrada para os filtros."}</td></tr>`;
+    atualizarIndicadoresRc07();
+
+    modalRc07Body.querySelectorAll(".rc07-check").forEach((input) => {
+        input.addEventListener("change", async () => {
+            const atual = getRc07Flags();
+            const atualMarcados = atual[key] || {};
+            const codigo = String(input.dataset.codigo || "").trim();
+            const item = lista.find((equipe) => String(equipe.codigo || "").trim() === codigo) || { codigo };
+            const checkedAnterior = !input.checked;
+            const detalheAnterior = rc07UltimosDetalhesMarcados[codigo] ? { ...rc07UltimosDetalhesMarcados[codigo] } : null;
+            if (input.checked) atualMarcados[codigo] = true;
+            else delete atualMarcados[codigo];
+            if (input.checked) {
+                const horaMomento = normalizarHora(contexto?.hora || "11");
+                const snapshotMomento = obterSnapshotEquipeRc07PorHora(codigo, horaMomento, contexto) || item || {};
+                const prodMomento = Number(snapshotMomento?.prod ?? snapshotMomento?.prodDia ?? 0);
+                const metaMomento = Number(snapshotMomento?.meta ?? snapshotMomento?.metaDia ?? 0);
+                const percMomento = Number(snapshotMomento?.percProdDia ?? (metaMomento > 0 ? (prodMomento / metaMomento) * 100 : 0));
+                rc07UltimosDetalhesMarcados[codigo] = {
+                    horaReferencia: horaMomento,
+                    frota: String(snapshotMomento?.frota || item?.frota || ""),
+                    equipe: String(snapshotMomento?.equipe || item?.equipe || ""),
+                    meta: metaMomento,
+                    prod: prodMomento,
+                    faixa: String(snapshotMomento?.faixaDia || classificar(percMomento) || "-").toUpperCase(),
+                    perc: Number.isFinite(percMomento) ? percMomento : 0
+                };
+            } else {
+                delete rc07UltimosDetalhesMarcados[codigo];
+            }
+            atual[key] = atualMarcados;
+            salvarRc07Flags(atual);
+            rc07UltimosMarcados = { ...atualMarcados };
+            if (kpiRc07Total) kpiRc07Total.innerText = String(Object.keys(atualMarcados).length);
+            input.disabled = true;
+            try {
+                await salvarRc07FlagBanco(contexto, item, input.checked);
+                if (rc07SomenteFlegadas && !input.checked) {
+                    renderizarModalRc07(lista, contexto, atualMarcados);
+                }
+            } catch (error) {
+                input.checked = checkedAnterior;
+                if (checkedAnterior) atualMarcados[codigo] = true;
+                else delete atualMarcados[codigo];
+                atual[key] = atualMarcados;
+                salvarRc07Flags(atual);
+                if (detalheAnterior) rc07UltimosDetalhesMarcados[codigo] = detalheAnterior;
+                else delete rc07UltimosDetalhesMarcados[codigo];
+                rc07UltimosMarcados = { ...atualMarcados };
+                if (kpiRc07Total) kpiRc07Total.innerText = String(Object.keys(atualMarcados).length);
+                alert(`Nao foi possivel salvar no banco: ${String(error?.message || error)}`);
+            } finally {
+                input.disabled = false;
+            }
+        });
+    });
+
+    const metaTotal = lista.reduce((acc, item) => acc + Number(item.metaDia || 0), 0);
+    if (kpiRc07Total) kpiRc07Total.innerText = String(Object.keys(marcados).length);
+    if (kpiRc07Equipes) kpiRc07Equipes.innerText = String(lista.length);
+    if (kpiRc07Meta) kpiRc07Meta.innerText = fmt3(metaTotal);
+    if (modalRc07Meta) {
+        const supTxt = contexto?.supervisor ? ` | Supervisor: ${rotuloGrupoExibicao(contexto.supervisor)}` : " | Todos os supervisores";
+        modalRc07Meta.innerText = `${formatarDataBR(contexto?.data) || contexto?.data || "-"}${contexto?.uo ? ` | UO ${contexto.uo}` : ""}${supTxt}`;
+    }
+}
+
+function obterCodigosRc07Flegados() {
+    return new Set(
+        Object.entries(rc07UltimosMarcados || {})
+            .filter(([, marcado]) => !!marcado)
+            .map(([codigo]) => String(codigo || "").trim())
+            .filter(Boolean)
+    );
+}
+
+function linhaServicoEhRc07(row) {
+    const codAtiv = String(obterValorControleServico(row, ["COD_ATIV", "COD ATIV", "CODATIV"]) || "").trim().toUpperCase();
+    const tipoServico = String(obterValorControleServico(row, ["TIPO_SERVICO", "TIPO SERVICO", "TIPO"]) || "").trim().toUpperCase();
+    return codAtiv === "RC07" || tipoServico.includes("RC07");
+}
+
+function obterMenorHoraControleServico(rows, candidates) {
+    const minutos = rows
+        .map(row => horaTextoParaMinutos(formatarHoraControleServico(obterValorControleServico(row, candidates))))
+        .filter(v => Number.isFinite(v));
+    if (!minutos.length) return "-";
+    return minutosParaHora(Math.min(...minutos));
+}
+
+function obterMaiorHoraControleServico(rows, candidates) {
+    const minutos = rows
+        .map(row => horaTextoParaMinutos(formatarHoraControleServico(obterValorControleServico(row, candidates))))
+        .filter(v => Number.isFinite(v));
+    if (!minutos.length) return "-";
+    return minutosParaHora(Math.max(...minutos));
+}
+
+function obterSnapshotEquipeRc07PorHora(codigo, hora, contexto = {}) {
+    const cod = String(codigo || "").trim();
+    const horaRef = normalizarHora(hora);
+    const data = String(contexto?.data || dataSelect?.value || "").trim();
+    const uo = String(contexto?.uo || uoSelect?.value || "").trim();
+    const supervisor = String(contexto?.supervisor || "").trim();
+    if (!cod || !horaRef) return null;
+
+    const linha = obterLinhasContextoModal(data, uo).find((row) => {
+        if (obterCodigoEquipeLinha(row) !== cod) return false;
+        if (obterHoraLinhaModalEquipes(row) !== horaRef) return false;
+        if (supervisor && String(row[campoGlobal] || "N/I").trim() !== supervisor) return false;
+        return true;
+    });
+
+    if (!linha) return null;
+
+    const metaDia = ajustarMetaClusterMtami(
+        toNumber(obterValorColuna(linha, ["Meta Prog.", "META PROG", "META_PROG", "META"])),
+        supervisor || linha[campoGlobal] || "",
+        obterValorColuna(linha, ["Nome", "NOME_EQUIPE", "NOME", "EQUIPE"]),
+        linha[campoGlobal]
+    );
+    const meta = (Number(metaDia || 0) / 9) * obterHorasAcumuladas(horaRef);
+    const prod = obterProducaoLinha(linha);
+    const perc = meta > 0 ? (prod / meta) * 100 : 0;
+    const faixa = String(linha["Classificação"] || classificar(perc) || "-").toUpperCase();
+
+    return {
+        codigo: cod,
+        frota: obterFrotaLinha(linha),
+        equipe: obterValorColuna(linha, ["Nome", "NOME_EQUIPE", "NOME", "EQUIPE"]) || "-",
+        supervisor: String(linha[campoGlobal] || supervisor || "").trim(),
+        metaDia,
+        meta,
+        prod,
+        percProdDia: perc,
+        faixaDia: faixa
+    };
+}
+
+function obterSnapshotMomentoRc07Flegada(item, contexto, detalheFlag = {}) {
+    const codigo = String(item?.codigo || "").trim();
+    const horaReferencia = normalizarHora(detalheFlag.horaReferencia || "11");
+    const snapshotDireto = obterSnapshotEquipeRc07PorHora(codigo, horaReferencia, contexto);
+    if (snapshotDireto) return snapshotDireto;
+
+    return item || {};
+}
+
+async function montarLinhaTabelaRc07Flegada(item, contexto) {
+    const data = String(contexto?.data || dataSelect?.value || "").trim();
+    const uo = String(contexto?.uo || uoSelect?.value || "").trim();
+    const codigo = String(item?.codigo || "").trim();
+    const detalheFlag = rc07UltimosDetalhesMarcados[codigo] || {};
+    const snapshotMomento = obterSnapshotMomentoRc07Flegada(item, contexto, detalheFlag);
+    let rows = [];
+
+    try {
+        rows = await carregarControleServico(data, uo, codigo);
+    } catch (error) {
+        console.warn("Falha ao carregar servicos da equipe flegada RC07.", codigo, error);
+    }
+
+    const rowsRc07 = rows.filter(linhaServicoEhRc07);
+    const temRc07 = rowsRc07.length > 0;
+    const produtivos = temRc07
+        ? rowsRc07.filter(row => normalizarProdutivoFlag(obterValorControleServico(row, ["PRODUTIVO", "PRODUTIVOS"])) === "SIM").length
+        : "";
+    const improdutivos = temRc07
+        ? rowsRc07.filter(row => normalizarProdutivoFlag(obterValorControleServico(row, ["PRODUTIVO", "PRODUTIVOS"])) === "NÃO").length
+        : "";
+    const realizados = produtivos + improdutivos;
+    const percImprod = temRc07 && realizados > 0 ? (Number(improdutivos || 0) / realizados) * 100 : "";
+    const prodMomento = Number(snapshotMomento?.prod ?? detalheFlag.prod ?? item?.prod ?? item?.prodDia ?? 0);
+    const metaDiaEquipe = Number(snapshotMomento?.metaDia ?? item?.metaDia ?? detalheFlag.metaDia ?? 0);
+    const percMomento = metaDiaEquipe > 0 ? (prodMomento / metaDiaEquipe) * 100 : 0;
+    const faixaMomento = String(classificar(percMomento) || "-").toUpperCase();
+    const snapshotFinal = obterSnapshotEquipeRc07PorHora(codigo, "17", contexto);
+    const faixaFinal = String(snapshotFinal?.faixaDia || item?.faixaDiaCompleta || item?.faixaDia || "-").toUpperCase();
+    const primeiroEncerramentoRc07 = temRc07 ? obterMenorHoraControleServico(rowsRc07, ["DATA_TERMINO_REAL", "ENCERRAMENTO", "DATA_TERMINO"]) : "";
+    const ultimoEncerramentoRc07 = temRc07 ? obterMaiorHoraControleServico(rowsRc07, ["DATA_TERMINO_REAL", "ENCERRAMENTO", "DATA_TERMINO"]) : "";
+
+    return {
+        codigo,
+        frota: String(detalheFlag.frota || item?.frota || "-"),
+        equipe: String(detalheFlag.equipe || item?.equipe || "-"),
+        meta: metaDiaEquipe,
+        prod: prodMomento,
+        faixa: faixaMomento,
+        percProd: percMomento,
+        totalServicos: rows.length || Number(item?.servicosDesignados || item?.servicos || 0) || "",
+        cod7Designados: temRc07 ? rowsRc07.length : "",
+        rc07: temRc07 ? realizados : "",
+        produtivos: temRc07 ? produtivos : "",
+        improdutivos: temRc07 ? improdutivos : "",
+        percImprod,
+        primeiroAtend: temRc07 ? primeiroEncerramentoRc07 : "",
+        ultimoAtend: temRc07 ? ultimoEncerramentoRc07 : "",
+        faixaFinal
+    };
+}
+
+function renderizarTabelaRc07Flegadas(linhas = []) {
+    if (!modalRc07FlegadasBody) return;
+
+    if (!linhas.length) {
+        modalRc07FlegadasBody.innerHTML = `<tr><td colspan="16">Nenhuma equipe flegada encontrada.</td></tr>`;
+        return;
+    }
+
+    modalRc07FlegadasBody.innerHTML = linhas.map((linha) => `
+        <tr>
+            <td>${escapeHtml(linha.codigo || "-")}</td>
+            <td>${escapeHtml(linha.frota || "-")}</td>
+            <td class="col-equipe">${escapeHtml(linha.equipe || "-")}</td>
+            <td>${fmt3(linha.meta)}</td>
+            <td>${fmt3(linha.prod)}</td>
+            <td class="faixa-${escapeHtml(linha.faixa || "-")}">${escapeHtml(linha.faixa || "-")}</td>
+            <td>${Number.isFinite(linha.percProd) ? linha.percProd.toFixed(2) : "0.00"}%</td>
+            <td>${escapeHtml(String(linha.totalServicos || ""))}</td>
+            <td>${escapeHtml(String(linha.cod7Designados || ""))}</td>
+            <td>${escapeHtml(String(linha.rc07 ?? ""))}</td>
+            <td>${escapeHtml(String(linha.produtivos ?? ""))}</td>
+            <td>${escapeHtml(String(linha.improdutivos ?? ""))}</td>
+            <td class="${Number(linha.percImprod || 0) > 20 ? "improd-alta" : ""}">${linha.percImprod === "" ? "" : `${Number(linha.percImprod || 0).toFixed(2)}%`}</td>
+            <td>${escapeHtml(linha.primeiroAtend ?? "")}</td>
+            <td>${escapeHtml(linha.ultimoAtend ?? "")}</td>
+            <td class="faixa-${escapeHtml(linha.faixaFinal || "-")}">${escapeHtml(linha.faixaFinal || "-")}</td>
+        </tr>
+    `).join("");
+}
+
+async function abrirModalTabelaRc07Flegadas() {
+    if (!modalRc07FlegadasTabela || !modalRc07FlegadasBody) return;
+
+    const codigosFlegados = obterCodigosRc07Flegados();
+    const lista = (rc07UltimaLista || []).filter(item => codigosFlegados.has(String(item.codigo || "").trim()));
+
+    if (!lista.length) {
+        alert("Nenhuma equipe flegada para exibir.");
+        return;
+    }
+
+    const contexto = rc07UltimoContexto || {};
+    const supTxt = contexto?.supervisor ? ` | Supervisor: ${rotuloGrupoExibicao(contexto.supervisor)}` : " | Todos os supervisores";
+    if (modalRc07FlegadasTitulo) modalRc07FlegadasTitulo.innerText = "TABELA RC07 FLEGADAS";
+    if (modalRc07FlegadasMeta) {
+        modalRc07FlegadasMeta.innerText = `${formatarDataBR(contexto?.data) || contexto?.data || "-"}${contexto?.uo ? ` | UO ${contexto.uo}` : ""}${supTxt}`;
+    }
+
+    modalRc07FlegadasBody.innerHTML = `<tr><td colspan="16">Carregando equipes flegadas...</td></tr>`;
+    modalRc07FlegadasTabela.classList.remove("hidden");
+
+    const linhas = await Promise.all(lista.map(item => montarLinhaTabelaRc07Flegada(item, contexto)));
+    linhas.sort((a, b) => String(a.codigo || "").localeCompare(String(b.codigo || ""), "pt-BR", { numeric: true }));
+    renderizarTabelaRc07Flegadas(linhas);
+}
+
+function fecharModalTabelaRc07Flegadas() {
+    if (modalRc07FlegadasTabela) modalRc07FlegadasTabela.classList.add("hidden");
+    if (modalRc07FlegadasTabela) modalRc07FlegadasTabela.classList.remove("fullscreen");
+    if (btnFullscreenRc07Flegadas) btnFullscreenRc07Flegadas.innerText = "⛶ Tela cheia";
+    if (modalRc07FlegadasBody) modalRc07FlegadasBody.innerHTML = "";
+}
+
+function alternarTelaCheiaRc07Flegadas() {
+    if (!modalRc07FlegadasTabela) return;
+    modalRc07FlegadasTabela.classList.toggle("fullscreen");
+    if (btnFullscreenRc07Flegadas) {
+        btnFullscreenRc07Flegadas.innerText = modalRc07FlegadasTabela.classList.contains("fullscreen")
+            ? "Sair da tela cheia"
+            : "⛶ Tela cheia";
+    }
+}
+
+async function baixarTabelaRc07FlegadasImagem() {
+    if (!modalRc07FlegadasTabela || modalRc07FlegadasTabela.classList.contains("hidden")) return;
+
+    try {
+        await garantirHtml2Canvas();
+    } catch {
+        alert("Nao foi possivel carregar o gerador de imagem.");
+        return;
+    }
+
+    const conteudo = modalRc07FlegadasTabela.querySelector(".modal-rc07-flegadas");
+    if (!conteudo) {
+        alert("Conteudo do modal nao encontrado.");
+        return;
+    }
+
+    const wrapper = document.createElement("div");
+    wrapper.style.position = "fixed";
+    wrapper.style.top = "-9999px";
+    wrapper.style.left = "-9999px";
+    wrapper.style.zIndex = "99999";
+    wrapper.style.background = "#ffffff";
+    wrapper.style.color = "#111827";
+    wrapper.style.padding = "12px";
+    wrapper.style.overflow = "visible";
+
+    const clone = conteudo.cloneNode(true);
+    clone.style.width = "max-content";
+    clone.style.maxWidth = "none";
+    clone.style.maxHeight = "none";
+    clone.style.height = "auto";
+    clone.style.overflow = "visible";
+    clone.querySelector(".acoes-modal")?.remove();
+    clone.querySelectorAll(".table-wrap, .rc07-flegadas-wrap").forEach(el => {
+        el.style.maxHeight = "none";
+        el.style.overflow = "visible";
+    });
+    clone.querySelectorAll("th").forEach(th => {
+        th.style.position = "relative";
+        th.style.top = "auto";
+        th.style.zIndex = "1";
+    });
+
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
+    html2canvas(wrapper, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        scrollX: 0,
+        scrollY: 0
+    }).then(canvas => {
+        const link = document.createElement("a");
+        const dataArquivo = String(rc07UltimoContexto?.data || obterHojeISO()).replaceAll("-", "");
+        link.download = `tabela-rc07-flegadas-${dataArquivo}.png`;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+    }).catch(() => {
+        alert("Nao foi possivel gerar a imagem da tabela RC07 flegadas.");
+    }).finally(() => {
+        wrapper.remove();
+    });
+}
+
+async function aplicarFiltrosModalRc07() {
+    const contexto = obterEquipesRc07Filtradas();
+    rc07FiltrosColunas = {};
+    if (modalRc07Body) {
+        modalRc07Body.innerHTML = `<tr><td colspan="9">Carregando equipes flegadas...</td></tr>`;
+    }
+    let marcados = null;
+    try {
+        marcados = await carregarRc07MarcadosBanco(contexto);
+    } catch (error) {
+        console.warn("Falha ao carregar RC07 do banco. Usando cache local.", error);
+        const flags = getRc07Flags();
+        rc07UltimosDetalhesMarcados = {};
+        marcados = flags[rc07ContextKey(contexto?.data, contexto?.uo, contexto?.supervisor)] || {};
+    }
+    renderizarModalRc07(contexto.lista, contexto, marcados);
+}
+
+async function abrirModalRc07() {
+    if (!modalRc07 || !modalRc07Body) return;
+    if (modoPeriodoAtivo()) {
+        alert("O RC07 usa equipes do dia. Selecione a Tabela Diária.");
+        return;
+    }
+    await prepararDadosModalTurno();
+    popularFiltrosRc07(dataSelect?.value || "", uoSelect?.value || "", "");
+    modalRc07Body.innerHTML = `<tr><td colspan="9">Carregando equipes...</td></tr>`;
+    if (kpiRc07Total) kpiRc07Total.innerText = "0";
+    if (kpiRc07Equipes) kpiRc07Equipes.innerText = "0";
+    if (kpiRc07Meta) kpiRc07Meta.innerText = "0.000";
+    if (modalRc07Meta) modalRc07Meta.innerText = "";
+    modalRc07.classList.remove("hidden");
+
+    try {
+        await aplicarFiltrosModalRc07();
+    } catch (error) {
+        modalRc07Body.innerHTML = `<tr><td colspan="9">${escapeHtml(String(error?.message || error))}</td></tr>`;
+    }
+}
+
+function fecharModalRc07() {
+    if (modalRc07) modalRc07.classList.add("hidden");
+    if (modalRc07) modalRc07.classList.remove("fullscreen");
+    if (btnFullscreenRc07) btnFullscreenRc07.innerText = "⛶ Tela cheia";
+    if (modalRc07Body) modalRc07Body.innerHTML = "";
+}
+
+function alternarTelaCheiaRc07() {
+    if (!modalRc07) return;
+    modalRc07.classList.toggle("fullscreen");
+    if (btnFullscreenRc07) {
+        btnFullscreenRc07.innerText = modalRc07.classList.contains("fullscreen")
+            ? "Sair da tela cheia"
+            : "⛶ Tela cheia";
+    }
+}
+
+if (btnRc07Aplicar) {
+    btnRc07Aplicar.addEventListener("click", aplicarFiltrosModalRc07);
+}
+
+if (rc07Data) {
+    rc07Data.addEventListener("change", () => {
+        popularFiltrosRc07(rc07Data.value, rc07Uo?.value || "", rc07Supervisor?.value || "");
+        aplicarFiltrosModalRc07();
+    });
+}
+
+if (rc07Uo) {
+    rc07Uo.addEventListener("change", () => {
+        popularFiltrosRc07(rc07Data?.value || "", rc07Uo.value, rc07Supervisor?.value || "");
+        aplicarFiltrosModalRc07();
+    });
+}
+
+if (rc07Supervisor) {
+    rc07Supervisor.addEventListener("change", aplicarFiltrosModalRc07);
+}
+
+function obterFiltroDataImprodTabelaGeral() {
+    const periodo = telaAceitaFiltroPeriodo() ? obterPeriodoFiltroAtual() : "diario";
+
+    if (periodo === "semanal") {
+        const semana = String(semanaSelect?.value || "").trim();
+        const intervalo = semana ? obterInicioEFimSemanaPorInput(semana) : null;
+        if (intervalo?.inicio && intervalo?.fim) {
+            return { inicio: intervalo.inicio, fim: intervalo.fim, label: `Semana ${intervalo.inicio} a ${intervalo.fim}` };
+        }
+    }
+
+    if (periodo === "mensal") {
+        const anoMes = String(mesSelect?.value || obterAnoMesAtual()).trim();
+        const [ano, mes] = anoMes.split("-").map(Number);
+        if (ano && mes) {
+            const inicio = `${anoMes}-01`;
+            const fim = formatISODateLocal(new Date(ano, mes, 0));
+            return { inicio, fim, label: `Mês ${anoMes}` };
+        }
+    }
+
+    if (periodo === "periodo") {
+        const ini = String(periodoInicioSelect?.value || "").trim();
+        const fimRaw = String(periodoFimSelect?.value || ini).trim();
+        if (ini && fimRaw) {
+            const inicio = ini <= fimRaw ? ini : fimRaw;
+            const fim = ini <= fimRaw ? fimRaw : ini;
+            return { inicio, fim, label: `Período ${inicio} a ${fim}` };
+        }
+    }
+
+    const data = String(dataSelect?.value || obterHojeISO()).trim();
+    return { data, inicio: data, fim: data, label: `Data ${data}` };
+}
+
+function montarMapaInfoEquipesTabelaGeral() {
+    const mapa = new Map();
+    (dados || []).forEach((linha) => {
+        const codigo = obterCodigoEquipeLinha(linha);
+        if (!codigo || mapa.has(codigo)) return;
+        mapa.set(codigo, {
+            codigo,
+            uo: obterUoLinha(linha),
+            supervisor: obterValorColuna(linha, ["SUPERVISOR - SETOR", "SUPERVISOR", "NOME_SUPERVISOR"]) || linha[campoGlobal] || "N/I",
+            equipe: obterValorColuna(linha, ["Nome", "NOME_EQUIPE", "NOME", "EQUIPE"]) || "-",
+            meta: ajustarMetaClusterMtami(
+                toNumber(linha["Meta Prog."]),
+                linha[campoGlobal] || "",
+                obterValorColuna(linha, ["Nome", "NOME_EQUIPE", "NOME", "EQUIPE"]),
+                linha[campoGlobal]
+            )
+        });
+    });
+    return mapa;
+}
+
+function contarMaisFrequente(lista) {
+    const contagem = new Map();
+    lista.forEach((valor) => {
+        const txt = String(valor || "").trim();
+        if (!txt || txt === "-") return;
+        contagem.set(txt, (contagem.get(txt) || 0) + 1);
+    });
+    return [...contagem.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "pt-BR"))[0]?.[0] || "-";
+}
+
+function dataAtualizacaoControleServico(row) {
+    const valor = obterValorControleServico(row, ["DATA_ATUALIZACAO", "DATA ATUALIZACAO", "DATA_ATUALIZACAO_D"]);
+    const dataHora = formatarDataHoraControleServico(valor);
+    return dataHora && dataHora !== "-" ? dataHora.split(" ")[0] : "-";
+}
+
+function montarLinhaImprodTabelaGeral(row, info) {
+    const tipoServico = obterValorControleServico(row, ["TIPO_SERVICO", "TIPO SERVICO"]);
+    const codAtiv = obterValorControleServico(row, ["COD_ATIV", "COD ATIV", "CODATIV"]);
+    const usPrev = parseControleServicoNumero(obterValorControleServico(row, ["US_PREV", "US PREV", "US_PREVISTAS"]));
+    const usExec = parseControleServicoNumero(obterValorControleServico(row, ["US_EXEC", "US EXEC", "US_EXECUTADAS"]));
+    const usPerdaRaw = parseControleServicoNumero(obterValorControleServico(row, ["US_PERDA", "US PERDA", "US_PERDAS"]));
+    const usPerda = usPerdaRaw || Math.max(usPrev - usExec, 0) || usPrev;
+    const meta = Number(info?.meta || 0);
+
+    return {
+        dataAtualizacao: dataAtualizacaoControleServico(row),
+        uo: info?.uo || obterValorControleServico(row, ["COD_UO", "UO"]) || "-",
+        supervisor: info?.supervisor || "-",
+        codigo: info?.codigo || obterValorControleServico(row, ["COD_EQUIPE_WM", "COD_EQUIPE", "NUM_EQUIPE"]) || "-",
+        equipe: info?.equipe || obterValorControleServico(row, ["NOME", "NOME_EQUIPE", "EQUIPE"]) || "-",
+        servico: 1,
+        tipoServico,
+        codAtiv,
+        usPrev,
+        usPerda,
+        percMeta: meta > 0 ? (usPerda / meta) * 100 : 0
+    };
+}
+
+function consolidarImprodutivasPorEquipe(linhas = []) {
+    const mapa = new Map();
+
+    linhas.forEach((item) => {
+        const chave = String(item.codigo || item.equipe || "").trim();
+        if (!chave) return;
+        const atual = mapa.get(chave) || {
+            ...item,
+            servico: 0,
+            tipos: new Set(),
+            codigosAtiv: new Set(),
+            usPrev: 0,
+            usPerda: 0,
+            percMeta: 0
+        };
+
+        atual.servico += 1;
+        if (item.tipoServico && item.tipoServico !== "-") atual.tipos.add(String(item.tipoServico));
+        if (item.codAtiv && item.codAtiv !== "-") atual.codigosAtiv.add(String(item.codAtiv));
+        atual.usPrev += Number(item.usPrev || 0);
+        atual.usPerda += Number(item.usPerda || 0);
+        atual.percMeta += Number(item.percMeta || 0);
+        mapa.set(chave, atual);
+    });
+
+    return [...mapa.values()].map((item) => ({
+        ...item,
+        tipoServico: [...item.tipos].join(" | ") || "-",
+        codAtiv: [...item.codigosAtiv].join(" | ") || "-",
+        percMeta: item.percMeta
+    })).sort((a, b) => b.servico - a.servico || String(a.equipe).localeCompare(String(b.equipe), "pt-BR"));
+}
+
+const IMPROD_TABELA_GERAL_COLUNAS = [
+    { key: "dataAtualizacao", tipo: "data" },
+    { key: "uo", tipo: "numero" },
+    { key: "supervisor", tipo: "texto" },
+    { key: "codigo", tipo: "numero" },
+    { key: "equipe", tipo: "texto" },
+    { key: "servico", tipo: "numero" },
+    { key: "tipoServico", tipo: "texto" },
+    { key: "codAtiv", tipo: "texto" },
+    { key: "usPrev", tipo: "numero" },
+    { key: "usPerda", tipo: "numero" },
+    { key: "percMeta", tipo: "numero" }
+];
+
+function valorOrdenacaoImprodTabelaGeral(item, coluna) {
+    const config = IMPROD_TABELA_GERAL_COLUNAS[coluna] || {};
+    const valor = item?.[config.key];
+
+    if (config.tipo === "numero") {
+        const n = Number(valor || 0);
+        return Number.isFinite(n) ? n : -Infinity;
+    }
+
+    if (config.tipo === "data") {
+        const txt = String(valor || "");
+        const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(txt);
+        if (match) return Number(`${match[3]}${match[2]}${match[1]}`);
+        return 0;
+    }
+
+    return String(valor || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toUpperCase();
+}
+
+function renderizarTabelaImprodTabelaGeral() {
+    if (!modalImprodTabelaGeralBody) return;
+    const linhas = [...currentImprodTabelaGeralLinhas];
+    const { coluna, direcao } = currentImprodTabelaGeralSort || {};
+
+    if (coluna !== null && coluna !== undefined) {
+        linhas.sort((a, b) => {
+            const va = valorOrdenacaoImprodTabelaGeral(a, coluna);
+            const vb = valorOrdenacaoImprodTabelaGeral(b, coluna);
+            let cmp = 0;
+            if (typeof va === "number" && typeof vb === "number") {
+                cmp = va - vb;
+            } else {
+                cmp = String(va).localeCompare(String(vb), "pt-BR");
+            }
+            return direcao === "asc" ? cmp : -cmp;
+        });
+    }
+
+    modalImprodTabelaGeralBody.innerHTML = linhas.length ? linhas.map(item => `
+        <tr>
+            <td class="col-center">${escapeHtml(item.dataAtualizacao)}</td>
+            <td class="col-center">${escapeHtml(item.uo)}</td>
+            <td>${escapeHtml(item.supervisor)}</td>
+            <td class="col-center">${escapeHtml(item.codigo)}</td>
+            <td>${escapeHtml(item.equipe)}</td>
+            <td class="col-center">${escapeHtml(String(item.servico || 0))}</td>
+            <td>${escapeHtml(item.tipoServico || "-")}</td>
+            <td class="col-center">${escapeHtml(item.codAtiv || "-")}</td>
+            <td class="col-num">${fmt3(item.usPrev)}</td>
+            <td class="col-num">${fmt3(item.usPerda)}</td>
+            <td class="col-num">${item.percMeta ? `${item.percMeta.toFixed(0)}%` : "-"}</td>
+        </tr>
+    `).join("") : `<tr><td colspan="11">Nenhum serviço improdutivo encontrado para o filtro selecionado.</td></tr>`;
+}
+
+function ordenarImprodTabelaGeral(coluna) {
+    const atual = currentImprodTabelaGeralSort || {};
+    const direcao = atual.coluna === coluna && atual.direcao === "desc" ? "asc" : "desc";
+    currentImprodTabelaGeralSort = { coluna, direcao };
+    atualizarIndicadoresOrdenacaoImprodTabelaGeral();
+    renderizarTabelaImprodTabelaGeral();
+}
+
+function atualizarIndicadoresOrdenacaoImprodTabelaGeral() {
+    document.querySelectorAll("#modalImprodTabelaGeral th[data-improd-sort]").forEach((th) => {
+        const coluna = Number(th.dataset.improdSort);
+        const ativo = currentImprodTabelaGeralSort?.coluna === coluna;
+        const indicador = th.querySelector(".sort-indicator");
+        if (indicador) {
+            indicador.textContent = ativo
+                ? (currentImprodTabelaGeralSort.direcao === "asc" ? "↑" : "↓")
+                : "↕";
+        }
+    });
+}
+
+function configurarOrdenacaoImprodTabelaGeral() {
+    document.querySelectorAll("#modalImprodTabelaGeral th[data-improd-sort]").forEach((th) => {
+        if (th.dataset.sortBound === "1") return;
+        th.dataset.sortBound = "1";
+        th.addEventListener("click", () => ordenarImprodTabelaGeral(Number(th.dataset.improdSort)));
+    });
+    atualizarIndicadoresOrdenacaoImprodTabelaGeral();
+}
+
+async function abrirModalImprodTabelaGeral(event) {
+    if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+    if (modoTabela !== "geral" || !modalImprodTabelaGeral || !modalImprodTabelaGeralBody) return;
+
+    const filtro = obterFiltroDataImprodTabelaGeral();
+    const uo = String(uoSelect?.value || "").trim();
+    const supervisorSelecionado = String(currentTabelaGeralSupervisorSelecionado || "").trim();
+    const params = new URLSearchParams();
+    if (uo) params.set("uo", uo);
+    if (filtro.data) {
+        params.set("data", filtro.data);
+    } else {
+        params.set("dataInicio", filtro.inicio);
+        params.set("dataFim", filtro.fim);
+    }
+    params.set("limit", "200000");
+
+    modalImprodTabelaGeral.classList.remove("hidden");
+    if (modalImprodTabelaGeralTitulo) modalImprodTabelaGeralTitulo.innerText = "% IMPRODUTIVO - Tabela Geral";
+    if (modalImprodTabelaGeralMeta) {
+        modalImprodTabelaGeralMeta.innerText = `${filtro.label}${supervisorSelecionado ? ` | Supervisor: ${rotuloGrupoExibicao(supervisorSelecionado)}` : ""}`;
+    }
+    modalImprodTabelaGeralBody.innerHTML = `<tr><td colspan="11">Carregando...</td></tr>`;
+
+    try {
+        const resp = await fetch(`/api/controle-servico?${params.toString()}`, { cache: "no-store" });
+        if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+        const payload = await resp.json();
+        const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+        const mapaInfo = montarMapaInfoEquipesTabelaGeral();
+
+        const improdutivas = rows
+            .filter(row => normalizarProdutivoFlag(obterValorControleServico(row, ["PRODUTIVO", "PRODUTIVOS"])) === "NÃO")
+            .map(row => {
+                const codigo = String(obterValorControleServico(row, ["COD_EQUIPE_WM", "COD_EQUIPE", "NUM_EQUIPE"]) || "").trim();
+                const info = mapaInfo.get(codigo) || { codigo };
+                return montarLinhaImprodTabelaGeral(row, info);
+            })
+            .filter(item => !supervisorSelecionado || String(item.supervisor || "").trim() === supervisorSelecionado);
+
+        const totalRealizados = rows.filter(row => {
+            const flag = normalizarProdutivoFlag(obterValorControleServico(row, ["PRODUTIVO", "PRODUTIVOS"]));
+            if (flag !== "SIM" && flag !== "NÃO") return false;
+            if (!supervisorSelecionado) return true;
+            const codigo = String(obterValorControleServico(row, ["COD_EQUIPE_WM", "COD_EQUIPE", "NUM_EQUIPE"]) || "").trim();
+            return String(mapaInfo.get(codigo)?.supervisor || "").trim() === supervisorSelecionado;
+        }).length;
+
+        const totalUsPerda = improdutivas.reduce((acc, item) => acc + Number(item.usPerda || 0), 0);
+        const codigos = new Set(improdutivas.map(item => String(item.codigo || "").trim()).filter(Boolean));
+        const perc = totalRealizados > 0 ? (improdutivas.length / totalRealizados) * 100 : 0;
+
+        if (improdKpiEquipes) improdKpiEquipes.innerText = String(codigos.size);
+        if (improdKpiUsPerda) improdKpiUsPerda.innerText = fmt3(totalUsPerda);
+        if (improdKpiTipoLider) improdKpiTipoLider.innerText = contarMaisFrequente(improdutivas.map(item => item.tipoServico));
+        if (improdKpiCodMaisUsado) improdKpiCodMaisUsado.innerText = contarMaisFrequente(improdutivas.map(item => item.codAtiv));
+        if (improdKpiPerc) {
+            improdKpiPerc.innerText = `${perc.toFixed(2)}%`;
+            improdKpiPerc.style.color = perc > 18 ? "#dc2626" : "#15803d";
+        }
+
+        currentImprodTabelaGeralLinhas = consolidarImprodutivasPorEquipe(improdutivas);
+        currentImprodTabelaGeralSort = { coluna: 5, direcao: "desc" };
+        configurarOrdenacaoImprodTabelaGeral();
+        renderizarTabelaImprodTabelaGeral();
+    } catch (error) {
+        console.error("Erro ao abrir modal de improdutividade:", error);
+        modalImprodTabelaGeralBody.innerHTML = `<tr><td colspan="11">Erro ao carregar dados de improdutividade.</td></tr>`;
+    }
+}
+
+function fecharModalImprodTabelaGeral() {
+    modalImprodTabelaGeral?.classList.add("hidden");
+    modalImprodTabelaGeral?.classList.remove("fullscreen");
+    if (btnFullscreenImprodTabelaGeral) btnFullscreenImprodTabelaGeral.innerText = "Expandir";
+    if (modalImprodTabelaGeralBody) modalImprodTabelaGeralBody.innerHTML = "";
+}
+
+function toggleFullscreenImprodTabelaGeral() {
+    if (!modalImprodTabelaGeral) return;
+    modalImprodTabelaGeral.classList.toggle("fullscreen");
+    if (btnFullscreenImprodTabelaGeral) {
+        btnFullscreenImprodTabelaGeral.innerText = modalImprodTabelaGeral.classList.contains("fullscreen")
+            ? "Reduzir"
+            : "Expandir";
+    }
+}
+
+async function baixarModalImprodTabelaGeralImagem() {
+    if (!modalImprodTabelaGeral || modalImprodTabelaGeral.classList.contains("hidden")) return;
+
+    try {
+        await garantirHtml2Canvas();
+    } catch {
+        alert("Não foi possível carregar o gerador de imagem.");
+        return;
+    }
+
+    const conteudo = modalImprodTabelaGeral.querySelector(".modal-improd-geral");
+    if (!conteudo) {
+        alert("Conteúdo do modal não encontrado.");
+        return;
+    }
+
+    const wrapper = document.createElement("div");
+    wrapper.style.position = "fixed";
+    wrapper.style.top = "-9999px";
+    wrapper.style.left = "-9999px";
+    wrapper.style.zIndex = "99999";
+    wrapper.style.background = "#ffffff";
+    wrapper.style.color = "#111827";
+    wrapper.style.padding = "18px";
+    wrapper.style.overflow = "visible";
+    wrapper.style.width = "auto";
+
+    const clone = conteudo.cloneNode(true);
+    clone.style.width = "max-content";
+    clone.style.maxWidth = "none";
+    clone.style.maxHeight = "none";
+    clone.style.height = "auto";
+    clone.style.overflow = "visible";
+    clone.querySelector(".modal-header-actions")?.remove();
+    clone.querySelectorAll(".table-wrap, .modal-table-wrap").forEach(el => {
+        el.style.maxHeight = "none";
+        el.style.overflow = "visible";
+    });
+    clone.querySelectorAll("th").forEach(th => {
+        th.style.position = "relative";
+        th.style.top = "auto";
+        th.style.zIndex = "1";
+    });
+
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
+    html2canvas(wrapper, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        scrollX: 0,
+        scrollY: 0
+    }).then(canvas => {
+        const link = document.createElement("a");
+        link.download = "improdutivo-tabela-geral.png";
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+    }).catch(() => {
+        alert("Não foi possível gerar a imagem do modal de improdutividade.");
+    }).finally(() => {
+        wrapper.remove();
+    });
+}
+
 function renderizarControleServicoTabela(rows) {
     if (!modalControleServicoBody) return;
 
@@ -9133,12 +11530,16 @@ if (btnMenuModo && drawerModo && drawerOverlay) {
         if (!a) return;
 
         if (a === "abrir-acordos") return typeof abrirHistoricoAcordos === "function" ? abrirHistoricoAcordos() : null;
+        if (a === "abrir-rc07") return typeof abrirModalRc07 === "function" ? abrirModalRc07() : null;
         if (a === "abrir-justificativas") return typeof abrirHistoricoJustificativas === "function" ? abrirHistoricoJustificativas() : null;
         if (a === "abrir-acordos-rs") return typeof abrirModalAcordosRs === "function" ? abrirModalAcordosRs() : null;
         if (a === "abrir-busca-global") return typeof abrirBuscaGlobal === "function" ? abrirBuscaGlobal() : null;
         if (a === "abrir-investigar-equipe") return typeof abrirInvestigarEquipe === "function" ? abrirInvestigarEquipe() : null;
         if (a === "abrir-conflitos") return typeof abrirModalConflitos === "function" ? abrirModalConflitos() : null;
         if (a === "abrir-andon") return typeof abrirPainelAndon === "function" ? abrirPainelAndon() : null;
+        if (a === "abrir-painel-analitico") return window.open("painel-analitico.html", "_blank");
+        if (a === "abrir-painel-servicos-analitico") return window.open("painel-servicos-analitico.html", "_blank");
+        if (a === "abrir-painel-jornada-analitico") return window.open("painel-jornada-analitico.html", "_blank");
         if (a === "limpar-filtros") {
             filtrosAtivos = {};
             return typeof aplicar === "function" ? aplicar() : null;
@@ -9202,9 +11603,9 @@ uoSelect.onchange = () => {
         garantirDadosTotalHoras().finally(() => aplicar());
         return;
     }
-    carregarDadosPainelAtual({ forcar: true }).finally(() => {
+    recarregarDadosPainelEAplicar({ forcar: true }).then((ok) => {
+        if (!ok) return;
         popularSemanasDisponiveis();
-        aplicar();
     });
 };
 
@@ -9219,7 +11620,9 @@ if (turnoSelect) {
             const carregar = turnoEspecial || modoTabela === "total-horas"
                 ? garantirDadosTotalHoras()
                 : carregarDadosPainelAtual();
-            carregar.finally(() => aplicar());
+            carregar.then((ok) => {
+                if (ok !== false) aplicar();
+            });
         }
 
         if (!currentModalContext) return;
@@ -9244,7 +11647,7 @@ if (dataSelect) {
         }
 
         if (modoTabela === "diario" || modoTabela === "geral") {
-            carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
+            recarregarDadosPainelEAplicar({ forcar: true });
         }
     };
 }
@@ -9265,6 +11668,8 @@ if (periodoTabelaSelect) {
         if (periodo === "mensal" && mesSelect && !mesSelect.value) {
             mesSelect.value = obterAnoMesAtual();
         }
+        atualizarDisplaySemanaTabela();
+        atualizarDisplayMesTabela();
 
         if (periodo === "periodo") {
             const hoje = obterHojeISO();
@@ -9280,7 +11685,7 @@ if (periodoTabelaSelect) {
         if (grupoPeriodoInicio) grupoPeriodoInicio.classList.toggle("hidden", periodo !== "periodo");
         if (grupoPeriodoFim) grupoPeriodoFim.classList.toggle("hidden", periodo !== "periodo");
 
-        carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
+        recarregarDadosPainelEAplicar({ forcar: true });
     };
 }
 
@@ -9294,24 +11699,41 @@ if (horaSelect) {
 
 if (semanaSelect) {
     semanaSelect.onchange = () => {
+        atualizarDisplaySemanaTabela();
         if (modoTabela === "semanal" || (telaAceitaFiltroPeriodo() && obterPeriodoFiltroAtual() === "semanal")) {
-            carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
+            recarregarDadosPainelEAplicar({ forcar: true });
         }
     };
 }
 
 if (mesSelect) {
     mesSelect.onchange = () => {
+        atualizarDisplayMesTabela();
         if (modoTabela === "mensal" || modoTabela === "quinzena1" || modoTabela === "quinzena2" || (telaAceitaFiltroPeriodo() && obterPeriodoFiltroAtual() === "mensal")) {
-            carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
+            recarregarDadosPainelEAplicar({ forcar: true });
         }
     };
 }
 
+semanaDisplay?.addEventListener("click", abrirSemanaPickerTabela);
+semanaClear?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    limparSemanaPickerTabela();
+});
+mesDisplay?.addEventListener("click", abrirMesPickerTabela);
+mesClear?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    limparMesPickerTabela();
+});
+document.addEventListener("click", (event) => {
+    if (!event.target.closest("#grupoSemana")) fecharSemanaPickerTabela();
+    if (!event.target.closest("#grupoMes")) fecharMesPickerTabela();
+});
+
 if (periodoInicioSelect) {
     periodoInicioSelect.onchange = () => {
         if (modoTabela === "periodo" || (telaAceitaFiltroPeriodo() && obterPeriodoFiltroAtual() === "periodo")) {
-            carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
+            recarregarDadosPainelEAplicar({ forcar: true });
         }
     };
 }
@@ -9319,7 +11741,7 @@ if (periodoInicioSelect) {
 if (periodoFimSelect) {
     periodoFimSelect.onchange = () => {
         if (modoTabela === "periodo" || (telaAceitaFiltroPeriodo() && obterPeriodoFiltroAtual() === "periodo")) {
-            carregarDadosPainelAtual({ forcar: true }).finally(() => aplicar());
+            recarregarDadosPainelEAplicar({ forcar: true });
         }
     };
 }
@@ -9824,7 +12246,10 @@ async function baixarModalAcordosImagem() {
 }
 
 setModo("diario", false);
+atualizarDisplaySemanaTabela();
+atualizarDisplayMesTabela();
 configurarAcoesKpisModal();
+configurarCliqueKpiImprodTabelaGeral();
 if (inputImportarBackupAcordos) {
     inputImportarBackupAcordos.addEventListener("change", importarBackupAcordos);
 }

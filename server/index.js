@@ -1,4 +1,7 @@
 const path = require("path");
+const fs = require("fs/promises");
+const { execFile } = require("child_process");
+const { randomUUID } = require("crypto");
 
 const express = require("express");
 const cors = require("cors");
@@ -14,9 +17,68 @@ const app = express();
 app.disable("x-powered-by");
 
 app.use(cors());
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "5mb" }));
 
 const PORT = Number(process.env.PORT || 3001);
+const REPORT_COMPACT_COLUMNS = [
+  "id",
+  "DATA",
+  "COD_UO",
+  "COD_EQUIPE",
+  "NUM_EQUIPE",
+  "hora_atualizacao",
+  "hora_ini_jornada",
+  "INICIO_JORNADA",
+  "META",
+  "US_EXEC",
+  "EXECUTADOS",
+  "PRODUTIVOS",
+  "COD_CLASSIFICACAO_DINAMICO",
+  "CLASSIFICACAO_EXEC_META",
+  "CLASSIFICACAO_PREV_META",
+  "NOME_EQUIPE",
+  "NOME",
+  "TIPO_EQUIPE",
+  "TIPO",
+  "TIPO_VEICULO",
+  "MODALIDADE",
+  "PERFIL_EQUIPE",
+  "NOME_SUPERVISOR",
+  "NOME_LIDER",
+  "NOME_CONTROLADOR",
+  "PRIMEIRO_ATENDIMENTO",
+  "ULTIMO_ATENDIMENTO",
+  "INICIO_REFEICAO",
+  "TERMINO_REFEICAO",
+  "FIM_JORNADA",
+  "OBS"
+];
+
+const REPORT_TABELA_GERAL_COLUMNS = [
+  "id",
+  "DATA",
+  "COD_UO",
+  "COD_EQUIPE",
+  "NUM_EQUIPE",
+  "hora_atualizacao",
+  "META",
+  "US_EXEC",
+  "EXECUTADOS",
+  "PRODUTIVOS",
+  "COD_CLASSIFICACAO_DINAMICO",
+  "CLASSIFICACAO_EXEC_META",
+  "CLASSIFICACAO_PREV_META",
+  "NOME_EQUIPE",
+  "NOME",
+  "TIPO_EQUIPE",
+  "TIPO",
+  "TIPO_VEICULO",
+  "MODALIDADE",
+  "PERFIL_EQUIPE",
+  "NOME_SUPERVISOR",
+  "NOME_LIDER",
+  "NOME_CONTROLADOR"
+];
 
 function getHistoryTableName(envName, fallbackName) {
   return sanitizeTableName(process.env[envName] || fallbackName);
@@ -24,6 +86,18 @@ function getHistoryTableName(envName, fallbackName) {
 
 function getStateTableName() {
   return sanitizeTableName(process.env.MYSQL_TABLE_STATE_ACORDOS || "painel_acordos_estado");
+}
+
+function getRc07FlagsDbName() {
+  return sanitizeTableName(process.env.MYSQL_RC07_FLAGS_DATABASE || "aompanhamento_impedimento");
+}
+
+function getRc07FlagsTableName() {
+  return sanitizeTableName(process.env.MYSQL_RC07_FLAGS_TABLE || "rc07_equipes_flegadas");
+}
+
+function buildRc07ContextKey(dataRef, uo, supervisor) {
+  return [String(dataRef || ""), String(uo || ""), String(supervisor || "")].join("|");
 }
 
 function toMysqlDateTime(value) {
@@ -55,9 +129,8 @@ function getWeekRangeFromIsoDate(isoDate) {
   if (Number.isNaN(date.getTime())) return null;
 
   const day = date.getDay();
-  const diffToMonday = day === 0 ? -6 : 1 - day;
   const start = new Date(date);
-  start.setDate(date.getDate() + diffToMonday);
+  start.setDate(date.getDate() - day);
   const end = new Date(start);
   end.setDate(start.getDate() + 6);
 
@@ -91,6 +164,53 @@ function buildDataWhere(value, where, params) {
 
   where.push("DATA = ?");
   params.push(raw);
+}
+
+function buildDataRangeWhere(startValue, endValue, where, params) {
+  const start = parseFlexibleDateRef(startValue);
+  const end = parseFlexibleDateRef(endValue);
+  if (!start && !end) return;
+
+  const min = start && end ? (start <= end ? start : end) : (start || end);
+  const max = start && end ? (start <= end ? end : start) : (start || end);
+  const startDate = new Date(`${min}T00:00:00`);
+  const endDate = new Date(`${max}T00:00:00`);
+  const diffDays = Math.round((endDate - startDate) / 86400000);
+
+  if (Number.isFinite(diffDays) && diffDays >= 0 && diffDays <= 62) {
+    const isoDates = [];
+    const brDates = [];
+    const cursor = new Date(startDate);
+    while (cursor <= endDate) {
+      const iso = [
+        cursor.getFullYear(),
+        String(cursor.getMonth() + 1).padStart(2, "0"),
+        String(cursor.getDate()).padStart(2, "0")
+      ].join("-");
+      isoDates.push(iso);
+      brDates.push(`${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    const placeholdersIso = isoDates.map(() => "?").join(",");
+    const placeholdersBr = brDates.map(() => "?").join(",");
+    where.push(`(
+      DATA BETWEEN ? AND ?
+      OR CAST(DATA AS CHAR) IN (${placeholdersIso})
+      OR CAST(DATA AS CHAR) IN (${placeholdersBr})
+    )`);
+    params.push(min, max, ...isoDates, ...brDates);
+    return;
+  }
+
+  where.push(`(
+    DATE(DATA) BETWEEN ? AND ?
+    OR STR_TO_DATE(CAST(DATA AS CHAR), '%d/%m/%Y') BETWEEN ? AND ?
+    OR (
+      CAST(DATA AS CHAR) REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+      AND LEFT(CAST(DATA AS CHAR), 10) BETWEEN ? AND ?
+    )
+  )`);
+  params.push(min, max, min, max, min, max);
 }
 
 function addDateFilterForColumns(value, columns, where, params) {
@@ -176,6 +296,39 @@ async function ensureStateTable(pool, table) {
       PRIMARY KEY (context_key)
     )
   `);
+}
+
+async function ensureRc07FlagsTable(pool) {
+  const database = getRc07FlagsDbName();
+  const table = getRc07FlagsTableName();
+
+  await pool.query(`CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`${database}\`.\`${table}\` (
+      id BIGINT NOT NULL AUTO_INCREMENT,
+      context_key VARCHAR(255) NOT NULL,
+      data_ref VARCHAR(20) NOT NULL,
+      uo VARCHAR(50) NULL,
+      supervisor VARCHAR(255) NULL,
+      hora_referencia VARCHAR(20) NULL,
+      codigo_equipe VARCHAR(50) NOT NULL,
+      frota VARCHAR(50) NULL,
+      equipe VARCHAR(255) NULL,
+      meta_dia DECIMAL(15,3) NULL,
+      prod_dia DECIMAL(15,3) NULL,
+      faixa_dia VARCHAR(20) NULL,
+      perc_prod DECIMAL(10,2) NULL,
+      ativo TINYINT(1) NOT NULL DEFAULT 1,
+      criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uk_rc07_contexto_equipe (context_key, codigo_equipe),
+      KEY idx_rc07_contexto (data_ref, uo, supervisor),
+      KEY idx_rc07_ativo (ativo, atualizado_em)
+    )
+  `);
+
+  return { database, table };
 }
 
 async function ensureHistoryAcordosTable(pool, table) {
@@ -436,12 +589,11 @@ app.get("/api/controle-servico", async (req, res) => {
     const where = [];
     const params = [];
     let reportOnlyStartedJourney = false;
-    const whereSemUo = [];
-    const paramsSemUo = [];
 
     const data = req.query.data;
     const uo = req.query.uo;
     const codEquipe = req.query.codEquipe;
+    const codAtiv = req.query.codAtiv;
 
     const dateCols = [];
     const colDataAtualizacao = pickCol(["DATA_ATUALIZACAO", "DATA ATUALIZACAO", "DATA_ATUALIZAÇÃO", "DATA_ATUALIZACAO_D"]);
@@ -460,25 +612,19 @@ app.get("/api/controle-servico", async (req, res) => {
 
     if (data) {
       addDateFilterForColumns(data, dateCols, where, params);
-      addDateFilterForColumns(data, dateCols, whereSemUo, paramsSemUo);
     }
 
     if (req.query.dataInicio) {
       where.push(`DATE(\`${colDataFiltro}\`) >= ?`);
       params.push(String(req.query.dataInicio).slice(0, 10));
-      whereSemUo.push(`DATE(\`${colDataFiltro}\`) >= ?`);
-      paramsSemUo.push(String(req.query.dataInicio).slice(0, 10));
     }
 
     if (req.query.dataFim) {
       where.push(`DATE(\`${colDataFiltro}\`) <= ?`);
       params.push(String(req.query.dataFim).slice(0, 10));
-      whereSemUo.push(`DATE(\`${colDataFiltro}\`) <= ?`);
-      paramsSemUo.push(String(req.query.dataFim).slice(0, 10));
     }
 
     const colUo = pickCol(["COD_UO", "UO"]);
-    const usouUo = Boolean(uo && colUo);
     if (uo && colUo) {
       where.push(`\`${colUo}\` = ?`);
       params.push(String(uo));
@@ -488,8 +634,13 @@ app.get("/api/controle-servico", async (req, res) => {
     if (codEquipe && colEq) {
       where.push(`\`${colEq}\` = ?`);
       params.push(String(codEquipe));
-      whereSemUo.push(`\`${colEq}\` = ?`);
-      paramsSemUo.push(String(codEquipe));
+    }
+
+    const colAtivCandidates = ["COD_ATIV", "COD ATIV", "CODATIV", "COD_ATIVIDADE", "CODIGO_ATIVIDADE", "TIPO_SERVICO"];
+    const colsAtiv = colAtivCandidates.map((name) => pickCol([name])).filter(Boolean);
+    if (codAtiv && colsAtiv.length) {
+      where.push(`(${colsAtiv.map((col) => `UPPER(TRIM(CAST(\`${col}\` AS CHAR))) = UPPER(TRIM(?))`).join(" OR ")})`);
+      params.push(...colsAtiv.map(() => String(codAtiv)));
     }
 
     const limitRaw = req.query.limit ?? "20000";
@@ -506,15 +657,6 @@ app.get("/api/controle-servico", async (req, res) => {
     params.push(limit);
 
     let [rows] = await pool.query(sql, params);
-
-    if (!rows.length && usouUo) {
-      let sqlSemUo = `SELECT * FROM \`${table}\``;
-      if (whereSemUo.length) sqlSemUo += ` WHERE ${whereSemUo.join(" AND ")}`;
-      if (orderCol) sqlSemUo += ` ORDER BY \`${orderCol}\` ASC`;
-      sqlSemUo += " LIMIT ?";
-      paramsSemUo.push(limit);
-      [rows] = await pool.query(sqlSemUo, paramsSemUo);
-    }
 
     res.json({ ok: true, table, count: rows.length, rows });
   } catch (error) {
@@ -1231,6 +1373,111 @@ app.post("/api/state/acordos/base", async (req, res) => {
   }
 });
 
+app.get("/api/rc07/flags", async (req, res) => {
+  try {
+    const pool = getPool();
+    const { database, table } = await ensureRc07FlagsTable(pool);
+
+    const dataRef = String(req.query.data_ref || req.query.data || "").trim();
+    const uo = String(req.query.uo || "").trim();
+    const supervisor = String(req.query.supervisor || "").trim();
+    const contextKey = buildRc07ContextKey(dataRef, uo, supervisor);
+
+    if (!dataRef) {
+      return res.status(400).json({ ok: false, error: "data_ref obrigatoria." });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT
+        codigo_equipe, frota, equipe, hora_referencia, meta_dia, prod_dia, faixa_dia, perc_prod, atualizado_em
+       FROM \`${database}\`.\`${table}\`
+       WHERE context_key = ? AND ativo = 1
+       ORDER BY equipe, codigo_equipe`,
+      [contextKey]
+    );
+
+    const marcados = {};
+    rows.forEach((row) => {
+      const codigo = String(row.codigo_equipe || "").trim();
+      if (codigo) marcados[codigo] = true;
+    });
+
+    res.json({ ok: true, database, table, context_key: contextKey, marcados, rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.post("/api/rc07/flags/item", async (req, res) => {
+  try {
+    const pool = getPool();
+    const { database, table } = await ensureRc07FlagsTable(pool);
+    const body = req.body || {};
+
+    const dataRef = String(body.data_ref || body.data || "").trim();
+    const uo = String(body.uo || "").trim();
+    const supervisor = String(body.supervisor || "").trim();
+    const horaReferencia = String(body.hora_referencia || body.hora || "").trim() || null;
+    const codigo = String(body.codigo_equipe || body.codigo || "").trim();
+    const checked = Boolean(body.checked);
+    const contextKey = buildRc07ContextKey(dataRef, uo, supervisor);
+
+    if (!dataRef) {
+      return res.status(400).json({ ok: false, error: "data_ref obrigatoria." });
+    }
+    if (!codigo) {
+      return res.status(400).json({ ok: false, error: "codigo_equipe obrigatorio." });
+    }
+
+    if (!checked) {
+      await pool.query(
+        `DELETE FROM \`${database}\`.\`${table}\` WHERE context_key = ? AND codigo_equipe = ?`,
+        [contextKey, codigo]
+      );
+      return res.json({ ok: true, database, table, context_key: contextKey, codigo_equipe: codigo, checked: false, deleted: true });
+    }
+
+    await pool.query(
+      `INSERT INTO \`${database}\`.\`${table}\` (
+        context_key, data_ref, uo, supervisor, hora_referencia, codigo_equipe,
+        frota, equipe, meta_dia, prod_dia, faixa_dia, perc_prod, ativo
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        data_ref = VALUES(data_ref),
+        uo = VALUES(uo),
+        supervisor = VALUES(supervisor),
+        hora_referencia = VALUES(hora_referencia),
+        frota = VALUES(frota),
+        equipe = VALUES(equipe),
+        meta_dia = VALUES(meta_dia),
+        prod_dia = VALUES(prod_dia),
+        faixa_dia = VALUES(faixa_dia),
+        perc_prod = VALUES(perc_prod),
+        ativo = VALUES(ativo),
+        atualizado_em = CURRENT_TIMESTAMP`,
+      [
+        contextKey,
+        dataRef,
+        uo || null,
+        supervisor || null,
+        horaReferencia,
+        codigo,
+        String(body.frota || "").trim() || null,
+        String(body.equipe || "").trim() || null,
+        body.meta_dia === null || body.meta_dia === undefined || body.meta_dia === "" ? null : Number(body.meta_dia),
+        body.prod_dia === null || body.prod_dia === undefined || body.prod_dia === "" ? null : Number(body.prod_dia),
+        String(body.faixa_dia || "").trim() || null,
+        body.perc_prod === null || body.perc_prod === undefined || body.perc_prod === "" ? null : Number(body.perc_prod),
+        checked ? 1 : 0
+      ]
+    );
+
+    res.json({ ok: true, database, table, context_key: contextKey, codigo_equipe: codigo, checked });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
 app.get("/api/report", async (req, res) => {
   try {
     const pool = getPool();
@@ -1267,6 +1514,8 @@ app.get("/api/report", async (req, res) => {
 
     if (req.query.data) {
       buildDataWhere(req.query.data, where, params);
+    } else if (req.query.dataStart || req.query.dataEnd) {
+      buildDataRangeWhere(req.query.dataStart, req.query.dataEnd, where, params);
     }
     if (req.query.uo) {
       where.push("COD_UO = ?");
@@ -1279,8 +1528,20 @@ app.get("/api/report", async (req, res) => {
     // por DATA + COD_UO + COD_EQUIPE + hora_atualizacao.
     if (table.toLowerCase() === "report_csc_hoje") {
       const whereSql = where.length ? ` WHERE ${where.join(" AND ")}` : "";
+      const compact = String(req.query.compact || "") === "1" || String(req.query.compact || "").toLowerCase() === "true";
+      const view = String(req.query.view || "").trim();
+      const compactColumnSource = view === "tabelaGeralPeriodo"
+        ? REPORT_TABELA_GERAL_COLUMNS
+        : REPORT_COMPACT_COLUMNS;
+      const availableColumns = compact ? new Set(await getTableColumns(pool, table)) : null;
+      const compactColumns = compact
+        ? compactColumnSource.filter((col) => availableColumns.has(col))
+        : [];
+      const selectCols = compact
+        ? compactColumns.map((col) => `r.\`${col}\``).join(",\n          ")
+        : "r.*";
       sql = `
-        SELECT r.*
+        SELECT ${selectCols}
         FROM \`${table}\` r
         JOIN (
           SELECT
@@ -1646,6 +1907,7 @@ app.get("/jornadas", async (req, res) => {
           NOME_CONTROLADOR,
           NOME_EQUIPE,
           COD_CLASSIFICACAO_DINAMICO,
+          CLASSIFICACAO_EXEC_META,
           META,
           US_EXEC AS PRODUCAO,
           EXECUTADOS AS SERVICOS_EXECUTADOS,
@@ -1678,6 +1940,7 @@ app.get("/jornadas", async (req, res) => {
           NOME_CONTROLADOR,
           NOME_EQUIPE,
           COD_CLASSIFICACAO_DINAMICO,
+          CLASSIFICACAO_EXEC_META,
           META,
           US_EXEC AS PRODUCAO,
           EXECUTADOS AS SERVICOS_EXECUTADOS,
@@ -1710,6 +1973,975 @@ app.get("/jornadas", async (req, res) => {
     res.json(rows);
   } catch (error) {
     res.status(500).json({ error: String(error?.message || error) });
+  }
+});
+
+function analiticoNumber(value) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return 0;
+    const normalized = trimmed.includes(",")
+      ? trimmed.replace(/\./g, "").replace(",", ".")
+      : trimmed;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function analiticoTimeToMinutes(value) {
+  const match = String(value || "").match(/(\d{1,2}):(\d{2})/);
+  if (!match) return Number.NaN;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function analiticoMinutesToTime(value) {
+  if (!Number.isFinite(value)) return "--:--";
+  const total = Math.max(0, Math.round(value));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function analiticoAverage(values) {
+  const list = values.filter(Number.isFinite);
+  return list.length ? list.reduce((acc, value) => acc + value, 0) / list.length : Number.NaN;
+}
+
+function analiticoFlagProdutivo(row) {
+  const value = String(row.PRODUTIVO || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+  if (["SIM", "S", "T", "1", "TRUE", "PRODUTIVO"].includes(value)) return "SIM";
+  if (["NAO", "N", "F", "0", "FALSE", "IMPRODUTIVO", "IMPEDIMENTO"].includes(value)) return "NAO";
+  return "";
+}
+
+function analiticoTipoEquipe(row = {}) {
+  const text = `${row.TIPO_EQUIPE || ""} ${row.NOME_EQUIPE || row.NOME || ""}`
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+  if (text.includes("MOTO") || text.includes("MTVP")) return "MOTO";
+  return "MULTI";
+}
+
+function analiticoClassificarFaixa(percentual) {
+  const value = Number(percentual);
+  if (!Number.isFinite(value)) return "-";
+  if (value >= 95) return "AA";
+  if (value >= 85) return "A";
+  if (value >= 75) return "B";
+  if (value >= 65) return "C";
+  return "D";
+}
+
+function analiticoEquipeD(percentual) {
+  const value = Number(percentual);
+  return Number.isFinite(value) && value <= 75;
+}
+
+function analiticoProdutividadeMes(row = {}) {
+  const metaMes = analiticoNumber(row.META_MES);
+  const valorMes = analiticoNumber(row.VALOR_US_MES);
+  return metaMes > 0 ? (valorMes / metaMes) * 100 : 0;
+}
+
+function analiticoFaixaPeso(faixa) {
+  const value = String(faixa || "").trim().toUpperCase();
+  if (value === "AA") return 5;
+  if (value === "A") return 4;
+  if (value === "B") return 3;
+  if (value === "C") return 2;
+  if (value === "D") return 1;
+  return null;
+}
+
+function analiticoFaixaPorPeso(peso) {
+  if (!Number.isFinite(peso)) return "-";
+  if (peso >= 4.5) return "AA";
+  if (peso >= 3.5) return "A";
+  if (peso >= 2.5) return "B";
+  if (peso >= 1.5) return "C";
+  return "D";
+}
+
+function analiticoDateParams(req) {
+  const dataInicio = parseFlexibleDateRef(req.query.dataInicio) || "2026-04-01";
+  const dataFim = parseFlexibleDateRef(req.query.dataFim) || "2026-04-30";
+  return { dataInicio, dataFim };
+}
+
+function analiticoAddMonths(date, months) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
+}
+
+function analiticoMonthKey(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 7);
+  }
+  const text = String(value || "");
+  const br = text.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) return `${br[3]}-${br[2]}`;
+  return text.slice(0, 7);
+}
+
+function analiticoMonthLabel(monthKey) {
+  const [, year = "", month = ""] = String(monthKey || "").match(/^(\d{4})-(\d{2})$/) || [];
+  const labels = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  const index = Number(month) - 1;
+  return labels[index] && year ? `${labels[index]}/${year.slice(2)}` : String(monthKey || "");
+}
+
+function edgeExecutablePath() {
+  const candidates = [
+    process.env.EDGE_EXECUTABLE,
+    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+  ].filter(Boolean);
+  return candidates[0];
+}
+
+function runFile(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { windowsHide: true }, (error, stdout, stderr) => {
+      if (error) {
+        error.message = `${error.message}${stderr ? `\n${stderr}` : ""}`;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function sanitizeDownloadName(value) {
+  return String(value || "painel-analitico.png")
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .slice(0, 120);
+}
+
+app.get("/api/painel-analitico/supervisores", async (req, res) => {
+  try {
+    const pool = getPool();
+    const { dataInicio, dataFim } = analiticoDateParams(req);
+    const [rows] = await pool.query(`
+      SELECT TRIM(NOME_SUPERVISOR) AS supervisor, COUNT(DISTINCT COD_EQUIPE) AS equipes
+      FROM report_csc_hoje
+      WHERE STR_TO_DATE(DATA, '%d/%m/%Y') >= ?
+        AND STR_TO_DATE(DATA, '%d/%m/%Y') <= ?
+        AND NULLIF(TRIM(NOME_SUPERVISOR), '') IS NOT NULL
+      GROUP BY TRIM(NOME_SUPERVISOR)
+      ORDER BY supervisor
+    `, [dataInicio, dataFim]);
+    res.json({ ok: true, dataInicio, dataFim, rows });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.get("/api/painel-analitico", async (req, res) => {
+  try {
+    const supervisor = String(req.query.supervisor || "").trim();
+    if (!supervisor) return res.status(400).json({ ok: false, error: "Informe o parametro supervisor." });
+
+    const pool = getPool();
+    const { dataInicio, dataFim } = analiticoDateParams(req);
+    const reportWhere = `
+      STR_TO_DATE(DATA, '%d/%m/%Y') >= ?
+      AND STR_TO_DATE(DATA, '%d/%m/%Y') <= ?
+      AND UPPER(TRIM(NOME_SUPERVISOR)) = UPPER(TRIM(?))
+    `;
+
+    const [reportRows] = await pool.query(`
+      SELECT r.*
+      FROM report_csc_hoje r
+      JOIN (
+        SELECT MAX(id) AS id
+        FROM report_csc_hoje
+        WHERE ${reportWhere}
+        GROUP BY DATA, COD_EQUIPE
+      ) latest ON latest.id = r.id
+      ORDER BY STR_TO_DATE(r.DATA, '%d/%m/%Y'), r.NOME_EQUIPE
+    `, [dataInicio, dataFim, supervisor]);
+
+    const codigos = [...new Set(reportRows.map((row) => String(row.COD_EQUIPE || "").trim()).filter(Boolean))];
+    const databaseLote = sanitizeTableNameUnicode(process.env.MYSQL_DATABASE_LOTE_PROD || "producao");
+    const viewLote = sanitizeTableNameUnicode(process.env.MYSQL_VIEW_LOTE_PROD || "nivel_1_meta");
+    let loteRows = [];
+    let controleRows = [];
+    if (codigos.length) {
+      const placeholders = codigos.map(() => "?").join(",");
+      const [rows] = await pool.query(`
+        SELECT *
+        FROM controle_servico
+        WHERE COD_EQUIPE_WM IN (${placeholders})
+          AND DATE(DATA_DESIGNACAO) >= ?
+          AND DATE(DATA_DESIGNACAO) <= ?
+      `, [...codigos, dataInicio, dataFim]);
+      controleRows = rows;
+
+      const [rowsLote] = await pool.query(`
+        SELECT
+          DATA,
+          TRIM(CAST(COD_EQUIPE AS CHAR)) AS COD_EQUIPE,
+          VALOR_US,
+          VALOR_US_MES,
+          META_MES,
+          META,
+          FAIXA_DIA,
+          FAIXA_MES
+        FROM \`${databaseLote}\`.\`${viewLote}\`
+        WHERE DATA IS NOT NULL
+          AND DATA >= ?
+          AND DATA <= ?
+          AND TRIM(CAST(COD_EQUIPE AS CHAR)) IN (${placeholders})
+      `, [dataInicio, dataFim, ...codigos]);
+      loteRows = rowsLote;
+    }
+
+    const reportByTeam = new Map();
+    reportRows.forEach((row) => {
+      const codigo = String(row.COD_EQUIPE || "").trim();
+      if (!reportByTeam.has(codigo)) reportByTeam.set(codigo, []);
+      reportByTeam.get(codigo).push(row);
+    });
+
+    const servicesByTeam = new Map();
+    controleRows.forEach((row) => {
+      const codigo = String(row.COD_EQUIPE_WM || "").trim();
+      if (!servicesByTeam.has(codigo)) servicesByTeam.set(codigo, []);
+      servicesByTeam.get(codigo).push(row);
+    });
+
+    const tipoPorCodigo = new Map();
+    reportRows.forEach((row) => {
+      const codigo = String(row.COD_EQUIPE || "").trim();
+      if (codigo && !tipoPorCodigo.has(codigo)) tipoPorCodigo.set(codigo, analiticoTipoEquipe(row));
+    });
+
+    const totalMetaLote = loteRows.reduce((acc, row) => acc + analiticoNumber(row.META), 0);
+    const totalExecLote = loteRows.reduce((acc, row) => acc + analiticoNumber(row.VALOR_US), 0);
+    const performanceGeral = totalMetaLote > 0 ? (totalExecLote / totalMetaLote) * 100 : 0;
+    const performanceTipo = (tipo) => {
+      const rows = loteRows.filter((row) => tipoPorCodigo.get(String(row.COD_EQUIPE || "").trim()) === tipo);
+      const meta = rows.reduce((acc, row) => acc + analiticoNumber(row.META), 0);
+      const prod = rows.reduce((acc, row) => acc + analiticoNumber(row.VALOR_US), 0);
+      return meta > 0 ? (prod / meta) * 100 : 0;
+    };
+    const lotePorEquipe = new Map();
+    const loteMensalPorEquipe = new Map();
+    loteRows.forEach((row) => {
+      const codigo = String(row.COD_EQUIPE || "").trim();
+      if (!codigo) return;
+      const dataRow = String(row.DATA || "").slice(0, 10);
+      const mensalAtual = loteMensalPorEquipe.get(codigo);
+      if (!mensalAtual || dataRow >= String(mensalAtual.DATA || "").slice(0, 10)) {
+        loteMensalPorEquipe.set(codigo, row);
+      }
+      const atual = lotePorEquipe.get(codigo) || { meta: 0, prod: 0, ratioTotal: 0, ratioCount: 0, faixaTotal: 0, faixaCount: 0 };
+      const metaDia = analiticoNumber(row.META);
+      const prodDia = analiticoNumber(row.VALOR_US);
+      const faixaPeso = analiticoFaixaPeso(row.FAIXA_DIA);
+      atual.meta += analiticoNumber(row.META);
+      atual.prod += analiticoNumber(row.VALOR_US);
+      if (metaDia > 0) {
+        atual.ratioTotal += (prodDia / metaDia) * 100;
+        atual.ratioCount += 1;
+      }
+      if (faixaPeso !== null) {
+        atual.faixaTotal += faixaPeso;
+        atual.faixaCount += 1;
+      }
+      lotePorEquipe.set(codigo, atual);
+    });
+    const equipesDLote = Array.from(loteMensalPorEquipe.values()).filter((item) => {
+      const percentual = analiticoProdutividadeMes(item);
+      return analiticoEquipeD(percentual);
+    }).length;
+
+    const firstTimes = reportRows.map((row) => analiticoTimeToMinutes(row.PRIMEIRO_ATENDIMENTO));
+    const lastTimes = reportRows.map((row) => analiticoTimeToMinutes(row.ULTIMO_ATENDIMENTO));
+    const jornadaTimes = reportRows.map((row) => {
+      const first = analiticoTimeToMinutes(row.PRIMEIRO_ATENDIMENTO);
+      const last = analiticoTimeToMinutes(row.ULTIMO_ATENDIMENTO);
+      return Number.isFinite(first) && Number.isFinite(last) && last >= first ? last - first : Number.NaN;
+    });
+    const jornadasValidas = jornadaTimes.filter(Number.isFinite).length;
+    const jornadasIncompletas = jornadaTimes.filter((min) => Number.isFinite(min) && min < 7 * 60).length;
+
+    const executados = controleRows.filter((row) => row.DATA_TERMINO_REAL && ["SIM", "NAO"].includes(analiticoFlagProdutivo(row)));
+    const improdutivos = executados.filter((row) => analiticoFlagProdutivo(row) === "NAO");
+    const indiceImpedimento = executados.length ? (improdutivos.length / executados.length) * 100 : 0;
+    const indiceImpTipo = (tipo) => {
+      const rows = executados.filter((row) => tipoPorCodigo.get(String(row.COD_EQUIPE_WM || "").trim()) === tipo);
+      const imp = rows.filter((row) => analiticoFlagProdutivo(row) === "NAO").length;
+      return rows.length ? (imp / rows.length) * 100 : 0;
+    };
+
+    let historicoVozes = [];
+    try {
+      const fimDate = new Date(`${dataFim}T00:00:00Z`);
+      const inicioHistoricoDate = analiticoAddMonths(new Date(Date.UTC(fimDate.getUTCFullYear(), fimDate.getUTCMonth(), 1)), -1);
+      const inicioHistorico = inicioHistoricoDate.toISOString().slice(0, 10);
+      const mesesHistorico = Array.from({ length: 2 }, (_, index) => {
+        const date = analiticoAddMonths(inicioHistoricoDate, index);
+        return date.toISOString().slice(0, 7);
+      });
+
+      const [historicoReportRows] = await pool.query(`
+        SELECT r.*
+        FROM report_csc_hoje r
+        JOIN (
+          SELECT MAX(id) AS id
+          FROM report_csc_hoje
+          WHERE STR_TO_DATE(DATA, '%d/%m/%Y') >= ?
+            AND STR_TO_DATE(DATA, '%d/%m/%Y') <= ?
+            AND UPPER(TRIM(NOME_SUPERVISOR)) = UPPER(TRIM(?))
+          GROUP BY DATA, COD_EQUIPE
+        ) latest ON latest.id = r.id
+        ORDER BY STR_TO_DATE(r.DATA, '%d/%m/%Y'), r.NOME_EQUIPE
+      `, [inicioHistorico, dataFim, supervisor]);
+
+      const historicoCodigos = [...new Set(historicoReportRows.map((row) => String(row.COD_EQUIPE || "").trim()).filter(Boolean))];
+      let historicoControleRows = [];
+      let historicoLoteRows = [];
+      if (historicoCodigos.length) {
+        const historicoPlaceholders = historicoCodigos.map(() => "?").join(",");
+        const [rowsControle] = await pool.query(`
+          SELECT *
+          FROM controle_servico
+          WHERE COD_EQUIPE_WM IN (${historicoPlaceholders})
+            AND DATE(DATA_DESIGNACAO) >= ?
+            AND DATE(DATA_DESIGNACAO) <= ?
+        `, [...historicoCodigos, inicioHistorico, dataFim]);
+        historicoControleRows = rowsControle;
+
+        const [rowsLoteHistorico] = await pool.query(`
+          SELECT
+            DATA,
+            TRIM(CAST(COD_EQUIPE AS CHAR)) AS COD_EQUIPE,
+            VALOR_US,
+            META
+          FROM \`${databaseLote}\`.\`${viewLote}\`
+          WHERE DATA IS NOT NULL
+            AND DATA >= ?
+            AND DATA <= ?
+            AND TRIM(CAST(COD_EQUIPE AS CHAR)) IN (${historicoPlaceholders})
+        `, [inicioHistorico, dataFim, ...historicoCodigos]);
+        historicoLoteRows = rowsLoteHistorico;
+      }
+
+      const historicoTipoPorCodigo = new Map();
+      historicoReportRows.forEach((row) => {
+        const codigo = String(row.COD_EQUIPE || "").trim();
+        if (codigo && !historicoTipoPorCodigo.has(codigo)) historicoTipoPorCodigo.set(codigo, analiticoTipoEquipe(row));
+      });
+
+      const porMes = new Map(mesesHistorico.map((mes) => [mes, {
+        mes,
+        label: analiticoMonthLabel(mes),
+        meta: 0,
+        prod: 0,
+        executados: 0,
+        improdutivos: 0,
+        jornadasValidas: 0,
+        jornadasIncompletas: 0
+      }]));
+
+      historicoLoteRows.forEach((row) => {
+        const mes = analiticoMonthKey(row.DATA);
+        const item = porMes.get(mes);
+        if (!item) return;
+        item.meta += analiticoNumber(row.META);
+        item.prod += analiticoNumber(row.VALOR_US);
+      });
+
+      historicoControleRows.forEach((row) => {
+        const codigo = String(row.COD_EQUIPE_WM || "").trim();
+        if (!historicoTipoPorCodigo.has(codigo) || !row.DATA_TERMINO_REAL) return;
+        const mes = analiticoMonthKey(row.DATA_DESIGNACAO || row.DATA_TERMINO_REAL);
+        const item = porMes.get(mes);
+        if (!item) return;
+        const flag = analiticoFlagProdutivo(row);
+        if (!["SIM", "NAO"].includes(flag)) return;
+        item.executados += 1;
+        if (flag === "NAO") item.improdutivos += 1;
+      });
+
+      historicoReportRows.forEach((row) => {
+        const mes = analiticoMonthKey(row.DATA);
+        const item = porMes.get(mes);
+        if (!item) return;
+        const first = analiticoTimeToMinutes(row.PRIMEIRO_ATENDIMENTO);
+        const last = analiticoTimeToMinutes(row.ULTIMO_ATENDIMENTO);
+        if (!Number.isFinite(first) || !Number.isFinite(last) || last < first) return;
+        item.jornadasValidas += 1;
+        if (last - first < 7 * 60) item.jornadasIncompletas += 1;
+      });
+
+      historicoVozes = mesesHistorico.map((mes) => {
+        const item = porMes.get(mes);
+        const impedimento = item.executados ? (item.improdutivos / item.executados) * 100 : 0;
+        const produtividade = item.meta > 0 ? (item.prod / item.meta) * 100 : 0;
+        const jornadaIncompleta = item.jornadasValidas ? (item.jornadasIncompletas / item.jornadasValidas) * 100 : 0;
+        return {
+          mes: item.mes,
+          label: item.label,
+          impedimento,
+          produtividade,
+          jornada: Math.max(0, Math.min(100, 100 - jornadaIncompleta)),
+          executados: item.executados,
+          improdutivos: item.improdutivos,
+          jornadasValidas: item.jornadasValidas,
+          jornadasIncompletas: item.jornadasIncompletas
+        };
+      });
+    } catch (_) {
+      historicoVozes = [];
+    }
+
+    const equipes = codigos.map((codigo) => {
+      const report = reportByTeam.get(codigo) || [];
+      const services = servicesByTeam.get(codigo) || [];
+      const exec = services.filter((row) => row.DATA_TERMINO_REAL && ["SIM", "NAO"].includes(analiticoFlagProdutivo(row)));
+      const imp = exec.filter((row) => analiticoFlagProdutivo(row) === "NAO");
+      const produtivos = exec.filter((row) => analiticoFlagProdutivo(row) === "SIM");
+      const loteEquipe = lotePorEquipe.get(codigo);
+      const loteMensalEquipe = loteMensalPorEquipe.get(codigo);
+      const meta = loteEquipe?.meta ?? report.reduce((acc, row) => acc + analiticoNumber(row.META), 0);
+      const prod = loteEquipe?.prod ?? report.reduce((acc, row) => acc + analiticoNumber(row.US_EXEC), 0);
+      const jornadaEquipeTimes = report.map((row) => {
+        const first = analiticoTimeToMinutes(row.PRIMEIRO_ATENDIMENTO);
+        const last = analiticoTimeToMinutes(row.ULTIMO_ATENDIMENTO);
+        return Number.isFinite(first) && Number.isFinite(last) && last >= first ? last - first : Number.NaN;
+      });
+      const first = report[0] || {};
+      const performance = loteMensalEquipe
+        ? analiticoProdutividadeMes(loteMensalEquipe)
+        : (loteEquipe?.ratioCount ? loteEquipe.ratioTotal / loteEquipe.ratioCount : (meta > 0 ? (prod / meta) * 100 : 0));
+      const faixaSistema = loteMensalEquipe
+        ? (String(loteMensalEquipe.FAIXA_MES || "").trim().toUpperCase() || "-")
+        : (loteEquipe?.faixaCount ? analiticoFaixaPorPeso(loteEquipe.faixaTotal / loteEquipe.faixaCount) : analiticoClassificarFaixa(performance));
+      return {
+        codigo,
+        equipe: first.NOME_EQUIPE || services[0]?.NOME || codigo,
+        tipo: analiticoTipoEquipe(first),
+        totalServicos: services.length,
+        executados: exec.length,
+        produtivos: produtivos.length,
+        improdutivos: imp.length,
+        impedimento: exec.length ? (imp.length / exec.length) * 100 : 0,
+        performance,
+        jornadaProdutiva: analiticoMinutesToTime(analiticoAverage(jornadaEquipeTimes)),
+        faixa: faixaSistema,
+        dias: new Set(report.map((row) => String(row.DATA || "").slice(0, 10))).size
+      };
+    });
+
+    const totalEquipes = codigos.length;
+    const totalServicos = controleRows.length;
+    const totalDiasEquipe = equipes.reduce((acc, item) => acc + item.dias, 0);
+    const topEquipes = equipes
+      .slice()
+      .sort((a, b) => b.totalServicos - a.totalServicos || a.equipe.localeCompare(b.equipe, "pt-BR"))
+      .slice(0, 10)
+      .map((item, index, arr) => {
+        const perc = totalServicos ? (item.totalServicos / totalServicos) * 100 : 0;
+        const acumulado = arr.slice(0, index + 1).reduce((acc, row) => acc + (totalServicos ? (row.totalServicos / totalServicos) * 100 : 0), 0);
+        return { ...item, perc, acumulado };
+      });
+
+    const porImpedimento = equipes.filter((item) => item.executados > 0).sort((a, b) => b.impedimento - a.impedimento);
+    const maiorImpedimento = porImpedimento[0] || null;
+    const menorImpedimento = porImpedimento.slice().reverse()[0] || null;
+    const equipesAcima30 = equipes.filter((item) => item.impedimento > 30).length;
+    const faixasBase = [
+      { label: ">= 50%", min: 50, max: Infinity },
+      { label: "40% a 49%", min: 40, max: 50 },
+      { label: "30% a 39%", min: 30, max: 40 },
+      { label: "20% a 29%", min: 20, max: 30 },
+      { label: "10% a 19%", min: 10, max: 20 },
+      { label: "< 10%", min: -Infinity, max: 10 }
+    ];
+    res.json({
+      ok: true,
+      filtros: { supervisor, dataInicio, dataFim },
+      supervisor,
+      periodo: { dataInicio, dataFim },
+      processo: "ANALITICO",
+      totalEquipes,
+      totalServicos,
+      mediaMensalServicos: totalEquipes ? totalServicos / totalEquipes : 0,
+      mediaServEquipeDia: totalDiasEquipe ? totalServicos / totalDiasEquipe : 0,
+      performance: {
+        geral: performanceGeral,
+        moto: performanceTipo("MOTO"),
+        multi: performanceTipo("MULTI"),
+        equipesD: equipesDLote
+      },
+      jornada: {
+        mediaPrimeiroAtendimento: analiticoMinutesToTime(analiticoAverage(firstTimes)),
+        mediaUltimoAtendimento: analiticoMinutesToTime(analiticoAverage(lastTimes)),
+        mediaJornadaProdutiva: analiticoMinutesToTime(analiticoAverage(jornadaTimes)),
+        percentualIncompleta: jornadasValidas ? (jornadasIncompletas / jornadasValidas) * 100 : 0
+      },
+      eficiencia: {
+        indiceImpedimento,
+        improdutivoMoto: indiceImpTipo("MOTO"),
+        improdutivoMulti: indiceImpTipo("MULTI"),
+        executados: executados.length,
+        improdutivos: improdutivos.length
+      },
+      topEquipes,
+      estatisticas: {
+        maiorImpedimento,
+        menorImpedimento,
+        equipesAcima30,
+        equipesAcima30Perc: totalEquipes ? (equipesAcima30 / totalEquipes) * 100 : 0,
+        top5Perc: topEquipes.reduce((acc, item) => acc + item.perc, 0),
+        top10Perc: topEquipes.reduce((acc, item) => acc + item.perc, 0)
+      },
+      faixasImpedimento: faixasBase.map((faixa) => {
+        const quantidade = equipes.filter((item) => item.impedimento >= faixa.min && item.impedimento < faixa.max).length;
+        return { ...faixa, quantidade, percentual: totalEquipes ? (quantidade / totalEquipes) * 100 : 0 };
+      }),
+      historicoVozes,
+      equipes
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.get("/api/painel-servicos-analitico", async (req, res) => {
+  try {
+    const supervisor = String(req.query.supervisor || "").trim();
+    if (!supervisor) return res.status(400).json({ ok: false, error: "Informe o parametro supervisor." });
+
+    const pool = getPool();
+    const { dataInicio, dataFim } = analiticoDateParams(req);
+    const reportWhere = `
+      STR_TO_DATE(DATA, '%d/%m/%Y') >= ?
+      AND STR_TO_DATE(DATA, '%d/%m/%Y') <= ?
+      AND UPPER(TRIM(NOME_SUPERVISOR)) = UPPER(TRIM(?))
+    `;
+
+    const [reportRows] = await pool.query(`
+      SELECT r.*
+      FROM report_csc_hoje r
+      JOIN (
+        SELECT MAX(id) AS id
+        FROM report_csc_hoje
+        WHERE ${reportWhere}
+        GROUP BY DATA, COD_EQUIPE
+      ) latest ON latest.id = r.id
+      ORDER BY STR_TO_DATE(r.DATA, '%d/%m/%Y'), r.NOME_EQUIPE
+    `, [dataInicio, dataFim, supervisor]);
+
+    const codigos = [...new Set(reportRows.map((row) => String(row.COD_EQUIPE || "").trim()).filter(Boolean))];
+    const controleTable = sanitizeTableNameUnicode(process.env.MYSQL_TABLE_CONTROLE_SERVICO || "controle_servico");
+    const columns = await getTableColumns(pool, controleTable);
+    const tipoServicoCol = columns.find((col) => ["TIPO_SERVICO", "TIPO SERVICO"].includes(String(col).toUpperCase()));
+    const tipoExpr = tipoServicoCol
+      ? `TRIM(COALESCE(\`${tipoServicoCol}\`, ''))`
+      : `TRIM(COALESCE(\`TIPO_SERVICO\`, \`TIPO SERVICO\`, ''))`;
+    const nomeEquipeCol = columns.find((col) => ["NOME_EQUIPE", "NOME", "EQUIPE"].includes(String(col).toUpperCase()));
+    const equipeExpr = nomeEquipeCol
+      ? `COALESCE(NULLIF(TRIM(CAST(\`${nomeEquipeCol}\` AS CHAR)), ''), TRIM(CAST(COD_EQUIPE_WM AS CHAR)))`
+      : `TRIM(CAST(COD_EQUIPE_WM AS CHAR))`;
+    const valorUsCol = columns.find((col) => ["VALOR_US", "US_EXEC", "US EXEC", "US_EXECUTADAS"].includes(String(col).toUpperCase()));
+    const metaCol = columns.find((col) => ["META", "META_US", "META US"].includes(String(col).toUpperCase()));
+    const valorUsExpr = valorUsCol ? `\`${valorUsCol}\`` : "0";
+    const metaExpr = metaCol ? `\`${metaCol}\`` : "0";
+
+    let controleRows = [];
+    if (codigos.length) {
+      const placeholders = codigos.map(() => "?").join(",");
+      const [rows] = await pool.query(`
+        SELECT
+          ${tipoExpr} AS tipoServico,
+          TRIM(CAST(COD_EQUIPE_WM AS CHAR)) AS COD_EQUIPE_WM,
+          ${equipeExpr} AS equipe,
+          ${valorUsExpr} AS VALOR_US,
+          ${metaExpr} AS META,
+          PRODUTIVO,
+          DATA_TERMINO_REAL
+        FROM \`${controleTable}\`
+        WHERE DATE(DATA_DESIGNACAO) >= ?
+          AND DATE(DATA_DESIGNACAO) <= ?
+          AND TRIM(CAST(COD_EQUIPE_WM AS CHAR)) IN (${placeholders})
+      `, [dataInicio, dataFim, ...codigos]);
+      controleRows = rows;
+    }
+
+    const totalServicos = controleRows.length;
+    const tiposMap = new Map();
+    let totalExecutados = 0;
+    let totalProdutivos = 0;
+    let totalImprodutivos = 0;
+
+    controleRows.forEach((row) => {
+      const tipo = String(row.tipoServico || '').trim() || 'OUTROS';
+      const item = tiposMap.get(tipo) || { tipo, totalServicos: 0, executados: 0, produtivos: 0, improdutivos: 0, usExec: 0, usMeta: 0 };
+      item.totalServicos += 1;
+      item.usExec += analiticoNumber(row.VALOR_US);
+      item.usMeta += analiticoNumber(row.META);
+      const flag = analiticoFlagProdutivo(row);
+      if (flag === 'SIM' || flag === 'NAO') {
+        item.executados += 1;
+        totalExecutados += 1;
+        if (flag === 'SIM') {
+          item.produtivos += 1;
+          totalProdutivos += 1;
+        } else {
+          item.improdutivos += 1;
+          totalImprodutivos += 1;
+        }
+      }
+      tiposMap.set(tipo, item);
+    });
+
+    const tipos = [...tiposMap.values()]
+      .map((item) => ({
+        ...item,
+        produtividade: item.executados ? (item.produtivos / item.executados) * 100 : 0,
+        improdutividade: item.executados ? (item.improdutivos / item.executados) * 100 : 0,
+        participacaoImprodutivos: totalImprodutivos ? (item.improdutivos / totalImprodutivos) * 100 : 0,
+        percentual: totalServicos ? (item.totalServicos / totalServicos) * 100 : 0
+      }))
+      .sort((a, b) => b.totalServicos - a.totalServicos || a.tipo.localeCompare(b.tipo, 'pt-BR'));
+
+    const topTipos = tipos.slice(0, 5);
+    const tipoMaisFrequente = topTipos[0] || null;
+    const tipoMaisProdutivo = [...tipos]
+      .filter((item) => item.executados > 0)
+      .sort((a, b) => b.produtividade - a.produtividade || b.totalServicos - a.totalServicos)[0] || null;
+    const tipoMaisImprodutivo = [...tipos]
+      .filter((item) => item.improdutivos > 0)
+      .sort((a, b) => b.improdutivos - a.improdutivos || b.improdutividade - a.improdutividade || b.totalServicos - a.totalServicos)[0] || null;
+    const topTiposImprodutivos = [...tipos]
+      .filter((item) => item.improdutivos > 0)
+      .sort((a, b) => b.improdutivos - a.improdutivos || b.improdutividade - a.improdutividade || a.tipo.localeCompare(b.tipo, 'pt-BR'))
+      .slice(0, 5);
+
+    const equipesMap = new Map();
+    controleRows.forEach((row) => {
+      const codigo = String(row.COD_EQUIPE_WM || '').trim();
+      if (!codigo) return;
+      const atual = equipesMap.get(codigo) || { codigo, equipe: row.equipe || codigo, totalServicos: 0, executados: 0, improdutivos: 0 };
+      atual.totalServicos += 1;
+      const flag = analiticoFlagProdutivo(row);
+      if (flag === 'SIM' || flag === 'NAO') {
+        atual.executados += 1;
+        if (flag === 'NAO') atual.improdutivos += 1;
+      }
+      equipesMap.set(codigo, atual);
+    });
+
+    const equipes = [...equipesMap.values()].map((item) => ({
+      ...item,
+      percImprodutivo: item.executados ? (item.improdutivos / item.executados) * 100 : 0
+    }));
+
+    const topEquipes = equipes
+      .sort((a, b) => b.totalServicos - a.totalServicos || a.equipe.localeCompare(b.equipe, 'pt-BR'))
+      .slice(0, 5);
+    const topEquipesImprodutivas = equipes
+      .filter((item) => item.improdutivos > 0)
+      .sort((a, b) => b.improdutivos - a.improdutivos || b.percImprodutivo - a.percImprodutivo || a.equipe.localeCompare(b.equipe, 'pt-BR'))
+      .slice(0, 5);
+
+    const mediaServDia = totalServicos && reportRows.length ? totalServicos / reportRows.length : 0;
+    const produtividadeGeral = totalExecutados ? (totalProdutivos / totalExecutados) * 100 : 0;
+    const improdutividadeGeral = totalExecutados ? (totalImprodutivos / totalExecutados) * 100 : 0;
+
+    const vozes = [
+      tipoMaisFrequente
+        ? `O tipo de serviço mais frequente é ${tipoMaisFrequente.tipo} com ${tipoMaisFrequente.totalServicos} serviços (${tipoMaisFrequente.percentual.toFixed(1)}% do total).`
+        : 'Não há serviços registrados no período para este supervisor.',
+      totalExecutados
+        ? `A produtividade geral dos serviços executados é de ${produtividadeGeral.toFixed(1)}%, com ${totalProdutivos} produtivos e ${totalImprodutivos} improdutivos.`
+        : 'Não há serviços executados registrados no período.',
+      topEquipes[0]
+        ? `A equipe com maior volume de serviços é ${topEquipes[0].equipe} com ${topEquipes[0].totalServicos} serviços.`
+        : 'Nenhuma equipe com serviços cadastrados neste período.'
+    ];
+
+    res.json({
+      ok: true,
+      filtros: { supervisor, dataInicio, dataFim },
+      supervisor,
+      periodo: { dataInicio, dataFim },
+      totalServicos,
+      totalExecutados,
+      totalProdutivos,
+      totalImprodutivos,
+      produtividadeGeral,
+      improdutividadeGeral,
+      totalTipos: tipos.length,
+      topTipos,
+      topTiposImprodutivos,
+      tipos,
+      topEquipes,
+      topEquipesImprodutivas,
+      totalEquipes: equipesMap.size,
+      mediaServDia,
+      tipoMaisFrequente: tipoMaisFrequente?.tipo || '-',
+      tipoMaisProdutivo: tipoMaisProdutivo?.tipo || '-',
+      tipoMaisImprodutivo: tipoMaisImprodutivo?.tipo || '-',
+      vozes
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.get("/api/painel-jornada-analitico", async (req, res) => {
+  try {
+    const supervisor = String(req.query.supervisor || "").trim();
+    if (!supervisor) return res.status(400).json({ ok: false, error: "Informe o parametro supervisor." });
+
+    const pool = getPool();
+    const { dataInicio, dataFim } = analiticoDateParams(req);
+    const reportWhere = `
+      STR_TO_DATE(DATA, '%d/%m/%Y') >= ?
+      AND STR_TO_DATE(DATA, '%d/%m/%Y') <= ?
+      AND UPPER(TRIM(NOME_SUPERVISOR)) = UPPER(TRIM(?))
+    `;
+
+    const [reportRows] = await pool.query(`
+      SELECT r.*
+      FROM report_csc_hoje r
+      JOIN (
+        SELECT MAX(id) AS id
+        FROM report_csc_hoje
+        WHERE ${reportWhere}
+        GROUP BY DATA, COD_EQUIPE
+      ) latest ON latest.id = r.id
+      ORDER BY STR_TO_DATE(r.DATA, '%d/%m/%Y'), r.NOME_EQUIPE
+    `, [dataInicio, dataFim, supervisor]);
+
+    const jornadaProdutivaIdealMin = 7 * 60 + 30;
+    const codigos = [...new Set(reportRows.map((row) => String(row.COD_EQUIPE || "").trim()).filter(Boolean))];
+    const porEquipe = new Map();
+    reportRows.forEach((row) => {
+      const codigo = String(row.COD_EQUIPE || "").trim();
+      if (!codigo) return;
+      if (!porEquipe.has(codigo)) {
+        porEquipe.set(codigo, {
+          codigo,
+          equipe: row.NOME_EQUIPE || row.NOME || codigo,
+          inicio: [],
+          primeiro: [],
+          ultimo: [],
+          fim: [],
+          trabalhoInicio: [],
+          trabalhoFim: [],
+          trabalho: [],
+          jornada: [],
+          refeicaoOk: 0,
+          dias: 0,
+          incompletas: 0,
+          semPrimeiro: 0,
+          semUltimo: 0,
+          inicioTardio: 0,
+          ultimoCedo: 0
+        });
+      }
+      const item = porEquipe.get(codigo);
+      item.dias += 1;
+      const inicio = analiticoTimeToMinutes(row.INICIO_JORNADA);
+      const primeiro = analiticoTimeToMinutes(row.PRIMEIRO_ATENDIMENTO);
+      const ultimo = analiticoTimeToMinutes(row.ULTIMO_ATENDIMENTO);
+      const fim = analiticoTimeToMinutes(row.FIM_JORNADA);
+      const inicioRef = analiticoTimeToMinutes(row.INICIO_REFEICAO);
+      const terminoRef = analiticoTimeToMinutes(row.TERMINO_REFEICAO);
+
+      if (Number.isFinite(inicio)) item.inicio.push(inicio);
+      if (Number.isFinite(primeiro)) item.primeiro.push(primeiro);
+      if (Number.isFinite(ultimo)) item.ultimo.push(ultimo);
+      if (Number.isFinite(fim)) item.fim.push(fim);
+      if (Number.isFinite(inicio) && Number.isFinite(fim) && fim >= inicio) {
+        item.trabalhoInicio.push(inicio);
+        item.trabalhoFim.push(fim);
+        item.trabalho.push(fim - inicio);
+      }
+      if (Number.isFinite(inicioRef) || Number.isFinite(terminoRef)) item.refeicaoOk += 1;
+      if (!Number.isFinite(primeiro)) item.semPrimeiro += 1;
+      if (!Number.isFinite(ultimo)) item.semUltimo += 1;
+      if (Number.isFinite(inicio) && inicio > 9 * 60) item.inicioTardio += 1;
+      if (Number.isFinite(ultimo) && ultimo < 16 * 60) item.ultimoCedo += 1;
+      if (Number.isFinite(primeiro) && Number.isFinite(ultimo) && ultimo >= primeiro) {
+        const jornada = ultimo - primeiro;
+        item.jornada.push(jornada);
+        if (jornada < jornadaProdutivaIdealMin) item.incompletas += 1;
+      }
+    });
+
+    const media = (values) => analiticoAverage(values);
+    const equipes = Array.from(porEquipe.values()).map((item) => {
+      const mediaTrabalho = media(item.trabalho);
+      const mediaJornada = media(item.jornada);
+      return {
+        codigo: item.codigo,
+        equipe: item.equipe,
+        dias: item.dias,
+        mediaInicio: analiticoMinutesToTime(media(item.inicio)),
+        mediaInicioTrabalho: analiticoMinutesToTime(media(item.trabalhoInicio)),
+        mediaPrimeiro: analiticoMinutesToTime(media(item.primeiro)),
+        mediaUltimo: analiticoMinutesToTime(media(item.ultimo)),
+        mediaFim: analiticoMinutesToTime(media(item.fim)),
+        mediaFimTrabalho: analiticoMinutesToTime(media(item.trabalhoFim)),
+        mediaTrabalhoMin: Number.isFinite(mediaTrabalho) ? mediaTrabalho : 0,
+        mediaTrabalho: analiticoMinutesToTime(mediaTrabalho),
+        mediaJornadaMin: Number.isFinite(mediaJornada) ? mediaJornada : 0,
+        mediaJornada: analiticoMinutesToTime(mediaJornada),
+        incompletas: item.incompletas,
+        semRefeicao: Math.max(0, item.dias - item.refeicaoOk),
+        semPrimeiro: item.semPrimeiro,
+        semUltimo: item.semUltimo,
+        inicioTardio: item.inicioTardio,
+        ultimoCedo: item.ultimoCedo
+      };
+    });
+
+    const jornadas = equipes.map((item) => item.mediaJornadaMin).filter((value) => Number.isFinite(value) && value > 0);
+    const totalDias = equipes.reduce((acc, item) => acc + item.dias, 0);
+    const totalIncompletas = equipes.reduce((acc, item) => acc + item.incompletas, 0);
+    const totalSemRefeicao = equipes.reduce((acc, item) => acc + item.semRefeicao, 0);
+    const totalSemPrimeiro = equipes.reduce((acc, item) => acc + item.semPrimeiro, 0);
+    const totalSemUltimo = equipes.reduce((acc, item) => acc + item.semUltimo, 0);
+    const totalInicioTardio = equipes.reduce((acc, item) => acc + item.inicioTardio, 0);
+    const totalUltimoCedo = equipes.reduce((acc, item) => acc + item.ultimoCedo, 0);
+    const topRisco = equipes
+      .slice()
+      .filter((item) => item.mediaJornadaMin > 0)
+      .sort((a, b) =>
+        a.mediaJornadaMin - b.mediaJornadaMin ||
+        b.incompletas - a.incompletas ||
+        a.equipe.localeCompare(b.equipe, "pt-BR")
+      )
+      .slice(0, 5);
+    const porJornada = equipes.filter((item) => item.mediaJornadaMin > 0).sort((a, b) => a.mediaJornadaMin - b.mediaJornadaMin);
+    const menorJornada = porJornada[0] || null;
+    const maiorJornada = porJornada.slice().reverse()[0] || null;
+    const maisTardio = equipes
+      .filter((item) => item.mediaInicio !== "--:--")
+      .sort((a, b) => analiticoTimeToMinutes(b.mediaInicio) - analiticoTimeToMinutes(a.mediaInicio))[0] || null;
+    const maiorRecorrenciaProdMenor730 = equipes
+      .filter((item) => item.incompletas > 0)
+      .sort((a, b) => b.incompletas - a.incompletas || a.mediaJornadaMin - b.mediaJornadaMin || a.equipe.localeCompare(b.equipe, "pt-BR"))[0] || null;
+
+    const faixasBase = [
+      { label: ">= 7h30", min: jornadaProdutivaIdealMin, max: Infinity },
+      { label: "7h a 7h29", min: 7 * 60, max: jornadaProdutivaIdealMin },
+      { label: "6h a 6h59", min: 6 * 60, max: 7 * 60 },
+      { label: "5h a 5h59", min: 5 * 60, max: 6 * 60 },
+      { label: "< 5h", min: -Infinity, max: 5 * 60 },
+      { label: "Sem jornada", min: null, max: null }
+    ];
+
+    res.json({
+      ok: true,
+      filtros: { supervisor, dataInicio, dataFim },
+      supervisor,
+      periodo: { dataInicio, dataFim },
+      processo: "JORNADA",
+      totalEquipes: codigos.length,
+      totalDias,
+      jornada: {
+        mediaInicio: analiticoMinutesToTime(analiticoAverage(equipes.flatMap((item) => porEquipe.get(item.codigo)?.trabalhoInicio || []))),
+        mediaPrimeiro: analiticoMinutesToTime(analiticoAverage(equipes.flatMap((item) => porEquipe.get(item.codigo)?.primeiro || []))),
+        mediaUltimo: analiticoMinutesToTime(analiticoAverage(equipes.flatMap((item) => porEquipe.get(item.codigo)?.ultimo || []))),
+        mediaFim: analiticoMinutesToTime(analiticoAverage(equipes.flatMap((item) => porEquipe.get(item.codigo)?.trabalhoFim || []))),
+        mediaTrabalho: analiticoMinutesToTime(analiticoAverage(equipes.flatMap((item) => porEquipe.get(item.codigo)?.trabalho || []))),
+        mediaProdutiva: analiticoMinutesToTime(analiticoAverage(equipes.flatMap((item) => porEquipe.get(item.codigo)?.jornada || []))),
+        percentualIncompleta: totalDias ? (totalIncompletas / totalDias) * 100 : 0,
+        percentualSemRefeicao: totalDias ? (totalSemRefeicao / totalDias) * 100 : 0,
+        percentualSemPrimeiro: totalDias ? (totalSemPrimeiro / totalDias) * 100 : 0,
+        percentualSemUltimo: totalDias ? (totalSemUltimo / totalDias) * 100 : 0,
+        percentualInicioTardio: totalDias ? (totalInicioTardio / totalDias) * 100 : 0,
+        percentualUltimoCedo: totalDias ? (totalUltimoCedo / totalDias) * 100 : 0
+      },
+      topRisco,
+      estatisticas: {
+        menorJornada,
+        maiorJornada,
+        maisTardio,
+        maiorRecorrenciaProdMenor7h: maiorRecorrenciaProdMenor730,
+        maiorRecorrenciaProdMenor730,
+        equipesComIncompleta: equipes.filter((item) => item.incompletas > 0).length,
+        equipesSemRefeicao: equipes.filter((item) => item.semRefeicao > 0).length
+      },
+      faixasJornada: faixasBase.map((faixa) => {
+        const quantidade = faixa.min === null
+          ? equipes.filter((item) => !item.mediaJornadaMin).length
+          : equipes.filter((item) => item.mediaJornadaMin >= faixa.min && item.mediaJornadaMin < faixa.max).length;
+        return { ...faixa, quantidade, percentual: codigos.length ? (quantidade / codigos.length) * 100 : 0 };
+      }),
+      equipes
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.post("/api/painel-analitico/export-image", async (req, res) => {
+  const exportDir = path.join(__dirname, "..", "tmp", "exports");
+  const id = randomUUID();
+  const htmlPath = path.join(exportDir, `${id}.html`);
+  const pngPath = path.join(exportDir, `${id}.png`);
+
+  try {
+    const width = Math.max(320, Math.min(3000, Number(req.body?.width) || 1280));
+    const height = Math.max(320, Math.min(3000, Number(req.body?.height) || 900));
+    const css = String(req.body?.css || "");
+    const panelHtml = String(req.body?.html || "");
+    if (!panelHtml.trim()) {
+      return res.status(400).json({ ok: false, error: "Painel vazio para exportação." });
+    }
+
+    await fs.mkdir(exportDir, { recursive: true });
+    const documentHtml = `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <style>
+    ${css}
+    html, body { margin: 0; padding: 0; background: #f7f8f4; }
+    .panel { margin: 0 !important; box-shadow: none !important; }
+  </style>
+</head>
+<body>${panelHtml}</body>
+</html>`;
+    await fs.writeFile(htmlPath, documentHtml, "utf8");
+
+    await runFile(edgeExecutablePath(), [
+      "--headless",
+      "--disable-gpu",
+      "--no-first-run",
+      `--window-size=${width},${height}`,
+      `--screenshot=${pngPath}`,
+      `file:///${htmlPath.replace(/\\/g, "/")}`
+    ]);
+
+    const png = await fs.readFile(pngPath);
+    const filename = sanitizeDownloadName(req.body?.filename || "painel-analitico.png");
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename.endsWith(".png") ? filename : `${filename}.png`}"`);
+    res.send(png);
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
+  } finally {
+    await Promise.all([
+      fs.unlink(htmlPath).catch(() => {}),
+      fs.unlink(pngPath).catch(() => {})
+    ]);
   }
 });
 
