@@ -9426,6 +9426,7 @@ function obterValorColunaRc07(item, coluna, marcados = {}) {
     if (coluna === "prod") return prodDia;
     if (coluna === "faixa") return faixaDia;
     if (coluna === "perc") return Number.isFinite(percProd) ? percProd : 0;
+    if (coluna === "servicos") return "Abrir serviços";
     return "";
 }
 
@@ -9502,6 +9503,20 @@ function abrirFiltroRc07(th, coluna, icon) {
     const painel = document.createElement("div");
     painel.className = "painel-flutuante painel-rc07-filtro";
 
+    const ordemBox = document.createElement("div");
+    ordemBox.className = "painel-ordem";
+
+    const btnAsc = document.createElement("button");
+    btnAsc.type = "button";
+    btnAsc.textContent = "Ordenar A-Z / menor-maior";
+
+    const btnDesc = document.createElement("button");
+    btnDesc.type = "button";
+    btnDesc.textContent = "Ordenar Z-A / maior-menor";
+
+    ordemBox.appendChild(btnAsc);
+    ordemBox.appendChild(btnDesc);
+
     const busca = document.createElement("input");
     busca.type = "text";
     busca.placeholder = "Buscar...";
@@ -9520,10 +9535,25 @@ function abrirFiltroRc07(th, coluna, icon) {
 
     footer.appendChild(btnLimpar);
     footer.appendChild(btnAplicar);
+    painel.appendChild(ordemBox);
     painel.appendChild(busca);
     painel.appendChild(lista);
     painel.appendChild(footer);
     document.body.appendChild(painel);
+
+    btnAsc.addEventListener("click", (event) => {
+        event.stopPropagation();
+        rc07Ordenacao = { coluna, direcao: "asc" };
+        painel.remove();
+        renderizarModalRc07(rc07UltimaLista, rc07UltimoContexto, rc07UltimosMarcados);
+    });
+
+    btnDesc.addEventListener("click", (event) => {
+        event.stopPropagation();
+        rc07Ordenacao = { coluna, direcao: "desc" };
+        painel.remove();
+        renderizarModalRc07(rc07UltimaLista, rc07UltimoContexto, rc07UltimosMarcados);
+    });
 
     const selecionadosAtuais = rc07FiltrosColunas[coluna];
     const labelTodas = document.createElement("label");

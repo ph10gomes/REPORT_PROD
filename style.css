@@ -3962,6 +3962,33 @@ tr.linha-acordo-ativa td:first-child{
     opacity:1;
 }
 
+.painel-rc07-filtro{
+    width:260px;
+}
+
+.painel-rc07-filtro .painel-ordem{
+    display:grid;
+    gap:4px;
+    padding:8px 8px 0;
+}
+
+.painel-rc07-filtro .painel-ordem button{
+    width:100%;
+    border:0;
+    border-radius:6px;
+    background:#eef4ff;
+    color:#0f3f86;
+    cursor:pointer;
+    font-size:11px;
+    font-weight:900;
+    padding:7px 8px;
+    text-align:left;
+}
+
+.painel-rc07-filtro .painel-ordem button:hover{
+    background:#dbeafe;
+}
+
 .tabela-rc07 td{
     font-size:14px;
     padding:9px 10px;
