@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel Analítico</title>
+  <link rel="stylesheet" href="frontend/painel-analitico.css?v=20260603-valor-mes-meta-mes">
+</head>
+<body>
+  <header class="toolbar no-print">
+    <a class="back" href="index.html">Voltar</a>
+    <label>
+      <span>Início</span>
+      <input id="dataInicio" type="date">
+    </label>
+    <label>
+      <span>Fim</span>
+      <input id="dataFim" type="date">
+    </label>
+    <label class="supervisor-field">
+      <span>Supervisor</span>
+      <select id="supervisorSelect"></select>
+    </label>
+    <label class="profile-upload">
+      <span>Foto</span>
+      <input id="fotoPerfilInput" type="file" accept="image/*">
+    </label>
+    <button id="btnCarregar" type="button">Carregar</button>
+    <button id="btnEditar" type="button">Editar textos</button>
+    <button id="btnExportarImagem" type="button">Exportar imagem</button>
+    <button id="btnImprimir" type="button">Imprimir</button>
+  </header>
+
+  <main class="page">
+    <section id="painelAnalitico" class="panel" aria-live="polite">
+      <div class="top">
+        <div class="person">
+          <div class="avatar" id="avatarPerfil"></div>
+          <h1 data-edit id="supervisorNome">SUPERVISOR</h1>
+        </div>
+        <h2 data-edit id="processoTitulo">PROCESSO - ANALÍTICO</h2>
+        <div class="brand">
+          <strong>NCSR</strong>
+          <span>ENERGIA</span>
+        </div>
+      </div>
+
+      <div class="summary">
+        <article class="card blue kpi-card">
+          <h3 data-edit>PERFORMANCE</h3>
+          <p class="kpi-main"><span>Resultado geral</span><strong id="perfResultado">0%</strong></p>
+          <div class="kpi-details">
+            <p><span>Moto</span><strong id="perfMoto">0%</strong></p>
+            <p><span>Multi</span><strong id="perfMulti">0%</strong></p>
+          </div>
+        </article>
+        <article class="card blue kpi-card">
+          <h3 data-edit>BASE OPERACIONAL</h3>
+          <p class="kpi-main"><span>Total de equipes</span><strong id="totalEquipesTop">0</strong></p>
+          <div class="kpi-details">
+            <p class="danger"><span>Equipes D</span><strong id="equipesD">0</strong></p>
+          </div>
+        </article>
+        <article class="card green kpi-card">
+          <h3 data-edit>JORNADA PRODUTIVA</h3>
+          <p>MED. 1º ATEND.: <strong id="medPrimeiro">--:--</strong></p>
+          <p>MED ULT. ATEND.: <strong id="medUltimo">--:--</strong></p>
+          <p>MED JORN PROD.: <strong id="medJornada">--:--</strong></p>
+          <p>JORN. INCOMP.: <strong id="jornadaIncomp">0%</strong></p>
+        </article>
+        <article class="card teal kpi-card">
+          <h3 data-edit>EFICIÊNCIA</h3>
+          <p>MÉDIA/DIA: <strong id="mediaServDia">0</strong></p>
+          <p>% IMPROD.: <strong id="impGeral">0%</strong></p>
+          <p>IMPROD. MOTO: <strong id="impMoto">0%</strong></p>
+          <p>IMPROD. MULTI: <strong id="impMulti">0%</strong></p>
+        </article>
+      </div>
+
+      <div class="grid">
+        <section class="box geral">
+          <h3 data-edit>DESEMPENHO GERAL</h3>
+          <div class="metric"><span class="ico people"></span><b>Total de Equipes</b><strong id="totalEquipes">0</strong></div>
+          <div class="metric"><span class="ico doc"></span><b>Total de Serviços</b><strong id="totalServicos">0</strong></div>
+          <div class="metric"><span class="ico bars"></span><b>Média Mensal Serv.</b><strong id="mediaMensal">0</strong></div>
+          <div class="metric"><span class="ico pct"></span><b>Índice Médio Imped.</b><strong id="indiceMedio">0%</strong></div>
+        </section>
+
+        <section class="box top5">
+          <h3 class="box-title-action"><span data-edit>TOP 10 EQUIPES - MAIOR VOLUME DE SERVIÇOS</span><button id="btnTopEquipesTelaCheia" type="button">Tela cheia</button></h3>
+          <table>
+            <thead><tr><th>POS.</th><th>Equipe</th><th>Serv.</th><th>Exec.</th><th>Prod.</th><th>Imped.</th><th>Jornada</th><th>Produt.</th><th>Faixa</th><th>%</th></tr></thead>
+            <tbody id="topEquipesBody"></tbody>
+            <tfoot><tr><td></td><td>TOTAL GERAL</td><td id="topTotal">0</td><td colspan="7">Todas as equipes filtradas</td></tr></tfoot>
+          </table>
+        </section>
+
+        <section class="box stats">
+          <h3 data-edit>ESTATÍSTICAS DE IMPEDIMENTO</h3>
+          <div class="stat"><span class="warn">!</span><b>Índice Médio de Impedimento</b><strong id="statIndice">0%</strong></div>
+          <div class="stat"><span class="mini-bars"></span><b>Equipe com Maior Impedimento<br><small id="maiorEquipe">-</small></b><strong id="maiorImp">0%</strong></div>
+          <div class="stat"><span class="mini-bars alt"></span><b>Equipe com Menor Impedimento<br><small id="menorEquipe">-</small></b><strong id="menorImp">0%</strong></div>
+          <div class="stat"><span class="pie"></span><b>Equipes com Impedimento<br>Acima de 30% <small id="acima30Perc"></small></b><strong id="acima30">0</strong></div>
+        </section>
+      </div>
+
+      <div class="bottom">
+        <section class="box dist">
+          <h3 data-edit>DISTRIBUIÇÃO DO ÍNDICE DE IMPEDIMENTO</h3>
+          <table>
+            <thead><tr id="faixaHeader"><th>FAIXA DE IMPEDIMENTO</th></tr></thead>
+            <tbody>
+              <tr id="faixaQtd"><th>Nº DE EQUIPES</th></tr>
+              <tr id="faixaPerc"><th>% DO TOTAL DE EQUIPES</th></tr>
+            </tbody>
+          </table>
+        </section>
+        <section class="box notes">
+          <h3 class="box-title-action"><span data-edit>ÍNDICE DAS VOZES</span><button id="btnVozesTelaCheia" type="button">Tela cheia</button></h3>
+          <div class="voice-index" id="voiceIndexChart" aria-label="Grafico de indices das vozes"></div>
+        </section>
+      </div>
+
+      <footer>
+        <strong data-edit>FOCO:</strong>
+        <span data-edit>Maximizar as horas produtivas, reduzindo impactos e perdas para alcançar melhores resultados com eficiência e disciplina operacional.</span>
+      </footer>
+      <p class="source" id="fonteTexto">Fonte: Banco MySQL | Dados consolidados</p>
+    </section>
+  </main>
+
+  <div class="equipes-modal no-print" id="equipesModal" aria-hidden="true">
+    <div class="equipes-modal-panel" role="dialog" aria-modal="true" aria-labelledby="equipesModalTitulo">
+      <header>
+        <div>
+          <strong id="equipesModalTitulo">Todas as equipes do supervisor</strong>
+          <span id="equipesModalSubtitulo">Dados do periodo filtrado</span>
+        </div>
+        <button id="btnFecharEquipesModal" type="button">Fechar</button>
+      </header>
+      <div class="equipes-modal-table">
+        <table>
+          <thead><tr><th>POS.</th><th>Equipe</th><th>Servicos</th><th>Executados</th><th>Produtivos</th><th>Impedimento</th><th>Jornada Prod.</th><th>Produtividade</th><th>Faixa</th><th>% Volume</th></tr></thead>
+          <tbody id="equipesModalBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="equipes-modal no-print" id="vozesModal" aria-hidden="true">
+    <div class="equipes-modal-panel vozes-modal-panel" role="dialog" aria-modal="true" aria-labelledby="vozesModalTitulo">
+      <header>
+        <div>
+          <strong id="vozesModalTitulo">Índice das vozes</strong>
+          <span id="vozesModalSubtitulo">Impedimento, produtividade e jornada</span>
+        </div>
+        <button id="btnFecharVozesModal" type="button">Fechar</button>
+      </header>
+      <div class="vozes-modal-content">
+        <div class="voice-index voice-index-full" id="voiceIndexModalChart" aria-label="Grafico ampliado de indices das vozes"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="frontend/painel-analitico.js?v=20260603-valor-mes-meta-mes"></script>
+</body>
+</html>

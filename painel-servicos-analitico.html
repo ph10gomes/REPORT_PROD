@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel Serviços Analítico</title>
+  <link rel="stylesheet" href="frontend/painel-analitico.css?v=20260520-servicos-analitico-v2">
+</head>
+<body>
+  <header class="toolbar no-print">
+    <a class="back" href="index.html">Voltar</a>
+    <label>
+      <span>Início</span>
+      <input id="dataInicio" type="date" value="2026-04-01">
+    </label>
+    <label>
+      <span>Fim</span>
+      <input id="dataFim" type="date" value="2026-04-30">
+    </label>
+    <label class="supervisor-field">
+      <span>Supervisor</span>
+      <select id="supervisorSelect"></select>
+    </label>
+    <button id="btnCarregar" type="button">Carregar</button>
+    <button id="btnEditar" type="button">Editar textos</button>
+    <button id="btnExportarImagem" type="button">Exportar imagem</button>
+    <button id="btnImprimir" type="button">Imprimir</button>
+  </header>
+
+  <main class="page">
+    <section id="painelAnalitico" class="panel servicos-panel" aria-live="polite">
+      <div class="top">
+        <div class="person">
+          <div class="avatar"></div>
+          <h1 data-edit id="supervisorNome">SUPERVISOR</h1>
+        </div>
+        <h2 data-edit id="processoTitulo">PROCESSO - SERVIÇOS</h2>
+        <div class="brand">
+          <strong>NCSR</strong>
+          <span>ENERGIA</span>
+        </div>
+      </div>
+
+      <div class="summary">
+        <article class="card blue">
+          <h3 data-edit>SERVIÇOS</h3>
+          <p>TOTAL: <strong id="totalServicos">0</strong></p>
+          <p>EXECUTADOS: <strong id="totalExecutados">0</strong></p>
+          <p>PRODUTIVOS: <strong id="totalProdutivos">0</strong></p>
+        </article>
+        <article class="card blue">
+          <h3 data-edit>PERFORMANCE</h3>
+          <p>PRODUTIVIDADE: <strong id="produtividadeGeral">0%</strong></p>
+          <p>IMPRODUTIVOS: <strong id="totalImprodutivos">0</strong></p>
+          <p>MÉDIA SERV. EQP. DIA: <strong id="mediaServDia">0</strong></p>
+        </article>
+        <article class="card green">
+          <h3 data-edit>TIPOS DE SERVIÇO</h3>
+          <p>TOTAL DE TIPOS: <strong id="totalTipos">0</strong></p>
+          <p>TIPO MAIS FREQUENTE: <strong id="tipoMaisFrequente">-</strong></p>
+          <p>MAIS IMPRODUTIVO: <strong id="tipoMaisImprodutivo">-</strong></p>
+        </article>
+        <article class="card teal">
+          <h3 data-edit>EQUIPES</h3>
+          <p>TOTAL DE EQUIPES: <strong id="totalEquipes">0</strong></p>
+          <p>MAIOR VOLUME: <strong id="maiorEquipe">-</strong></p>
+          <p>MAIOR VOLUME: <strong id="maiorEquipeServicos">0</strong></p>
+        </article>
+      </div>
+
+      <div class="grid">
+        <section class="box top5">
+          <h3 data-edit>TOP 5 TIPOS DE SERVIÇO</h3>
+          <table>
+            <thead><tr><th>POS.</th><th>Tipo</th><th>Serviços</th><th>%</th><th>Improdutividade</th></tr></thead>
+            <tbody id="topTiposBody"></tbody>
+            <tfoot><tr><td></td><td>TOTAL</td><td id="tiposTotalServicos">0</td><td>100%</td><td>-</td></tr></tfoot>
+          </table>
+        </section>
+
+        <section class="box stats">
+          <h3 data-edit>TOP 5 EQUIPES - MAIS SERVIÇOS</h3>
+          <table>
+            <thead><tr><th>POS.</th><th>Equipe</th><th>Serviços</th><th>Executados</th><th>Improdutivos</th></tr></thead>
+            <tbody id="topEquipesBody"></tbody>
+            <tfoot><tr><td></td><td>TOTAL EQUIPES</td><td id="topEquipesTotal">0</td><td></td><td></td></tr></tfoot>
+          </table>
+        </section>
+      </div>
+
+      <div class="bottom">
+        <section class="box dist">
+          <h3 data-edit>DISTRIBUIÇÃO POR TIPO DE SERVIÇO</h3>
+          <table>
+            <thead><tr><th>TIPO</th><th>Nº SERVIÇOS</th><th>% DO TOTAL</th><th>PRODUTIVIDADE</th></tr></thead>
+            <tbody id="tipoDistribuicaoBody"></tbody>
+          </table>
+        </section>
+        <section class="box notes">
+          <h3 data-edit>VOZES</h3>
+          <p data-edit id="vozTipoFrequente">-</p>
+          <p data-edit id="vozProdutividade">-</p>
+          <p data-edit id="vozEquipeMaior">-</p>
+        </section>
+      </div>
+
+      <footer>
+        <strong data-edit>FOCO:</strong>
+        <span data-edit>Entender o comportamento dos serviços, priorizar os tipos mais frequentes e melhorar a produtividade das equipes com base no volume de execução.</span>
+      </footer>
+      <p class="source" id="fonteTexto">Fonte: Banco MySQL | Dados consolidados</p>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="frontend/painel-servicos-analitico.js?v=20260520-servicos-analitico-v6"></script>
+</body>
+</html>

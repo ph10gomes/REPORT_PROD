@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel Jornada Analítico</title>
+  <link rel="stylesheet" href="frontend/painel-analitico.css?v=20260521-jornada-mfpmg-card-v1">
+</head>
+<body>
+  <header class="toolbar no-print">
+    <a class="back" href="painel-analitico.html">Voltar</a>
+    <label>
+      <span>Início</span>
+      <input id="dataInicio" type="date" value="2026-04-01">
+    </label>
+    <label>
+      <span>Fim</span>
+      <input id="dataFim" type="date" value="2026-04-30">
+    </label>
+    <label class="supervisor-field">
+      <span>Supervisor</span>
+      <select id="supervisorSelect"></select>
+    </label>
+    <button id="btnCarregar" type="button">Carregar</button>
+    <button id="btnEditar" type="button">Editar textos</button>
+    <button id="btnExportarImagem" type="button">Exportar imagem</button>
+    <button id="btnImprimir" type="button">Imprimir</button>
+  </header>
+
+  <main class="page">
+    <section id="painelAnalitico" class="panel jornada-panel" aria-live="polite">
+      <div class="top">
+        <div class="person">
+          <div class="avatar"></div>
+          <h1 data-edit id="supervisorNome">SUPERVISOR</h1>
+        </div>
+        <h2 data-edit id="processoTitulo">PROCESSO - JORNADA</h2>
+        <div class="brand">
+          <strong>NCSR</strong>
+          <span>ENERGIA</span>
+        </div>
+      </div>
+
+      <div class="summary">
+        <article class="card blue">
+          <h3 data-edit>JORNADA TRABALHO</h3>
+          <p>INÍCIO MÉDIO: <strong id="mediaInicio">--:--</strong></p>
+          <p>FIM MÉDIO: <strong id="mediaFim">--:--</strong></p>
+          <p>DURAÇÃO MÉDIA: <strong id="mediaTrabalho">--:--</strong></p>
+        </article>
+        <article class="card blue">
+          <h3 data-edit>ATENDIMENTO</h3>
+          <p>1º ATEND.: <strong id="mediaPrimeiro">--:--</strong></p>
+          <p>ÚLT. ATEND.: <strong id="mediaUltimo">--:--</strong></p>
+          <p>PROD. MÉDIA: <strong id="mediaProdutiva">--:--</strong></p>
+        </article>
+        <article class="card green">
+          <h3 data-edit>ADERÊNCIA</h3>
+          <p>PROD. &lt; 7H30: <strong id="percIncompleta">0%</strong></p>
+          <p>SEM REFEIÇÃO: <strong id="percSemRefeicao">0%</strong></p>
+          <p>ATRASO NO INÍCIO: <strong id="percInicioTardio">0%</strong></p>
+        </article>
+        <article class="card teal">
+          <h3 data-edit>CONTROLE</h3>
+          <p>SEM 1º ATEND.: <strong id="percSemPrimeiro">0%</strong></p>
+          <p>SEM ÚLT. ATEND.: <strong id="percSemUltimo">0%</strong></p>
+          <p>ÚLTIMO ATEND. CEDO: <strong id="percUltimoCedo">0%</strong></p>
+        </article>
+      </div>
+
+      <div class="grid">
+        <section class="box geral">
+          <h3 data-edit>RESUMO DA JORNADA</h3>
+          <div class="metric"><span class="ico people"></span><b>Total de Equipes</b><strong id="totalEquipes">0</strong></div>
+          <div class="metric"><span class="ico doc"></span><b>Jornada Produtiva</b><strong id="resumoProdutiva">--:--</strong></div>
+          <div class="metric"><span class="ico bars"></span><b>Jornada Trabalho</b><strong id="resumoJornada">--:--</strong></div>
+          <div class="metric"><span class="ico pct"></span><b>Produtiva &lt; 7h30</b><strong id="resumoIncomp">0%</strong></div>
+          <div id="turnoResumo" class="turno-summary"></div>
+        </section>
+
+        <section class="box top5">
+          <h3 data-edit>TOP 5 EQUIPES - MENOR JORNADA PRODUTIVA</h3>
+          <table>
+            <thead><tr><th>POS.</th><th>Equipe</th><th>1º</th><th>Últ.</th><th>Produtiva</th></tr></thead>
+            <tbody id="topJornadaBody"></tbody>
+            <tfoot><tr><td></td><td>TOTAL EQUIPES</td><td id="topTotalEquipes">0</td><td></td><td>-</td></tr></tfoot>
+          </table>
+        </section>
+
+        <section class="box stats">
+          <h3 data-edit>ESTATÍSTICAS DE JORNADA</h3>
+          <div class="stat"><span class="warn">!</span><b>Menor Produtiva Média<br><small id="menorJornadaEquipe">-</small></b><strong id="menorJornada">--:--</strong></div>
+          <div class="stat"><span class="mini-bars"></span><b>Maior Produtiva Média<br><small id="maiorJornadaEquipe">-</small></b><strong id="maiorJornada">--:--</strong></div>
+          <div class="stat"><span class="mini-bars alt"></span><b>Início Mais Tardio<br><small id="inicioTardioEquipe">-</small></b><strong id="inicioTardioHora">--:--</strong></div>
+          <div class="stat"><span class="pie"></span><b>Equipes com Jornada<br>Incompleta</b><strong id="equipesIncomp">0</strong></div>
+        </section>
+      </div>
+
+      <div class="bottom">
+        <section class="box dist">
+          <h3 data-edit>DISTRIBUIÇÃO DA JORNADA PRODUTIVA MÉDIA</h3>
+          <table>
+            <thead><tr id="faixaHeader"><th>FAIXA PRODUTIVA</th></tr></thead>
+            <tbody>
+              <tr id="faixaQtd"><th>Nº DE EQUIPES</th></tr>
+              <tr id="faixaPerc"><th>% DO TOTAL DE EQUIPES</th></tr>
+            </tbody>
+          </table>
+        </section>
+        <section class="box notes">
+          <h3 data-edit>PRINCIPAIS DESTAQUES</h3>
+          <p data-edit id="notaIncompleta">-</p>
+          <p data-edit id="notaRefeicao">-</p>
+          <p data-edit id="notaAtendimento">-</p>
+        </section>
+      </div>
+
+      <footer>
+        <strong data-edit>FOCO:</strong>
+        <span data-edit>Separar jornada de trabalho da jornada produtiva, garantindo início, fim, atendimentos, pausa de refeição e encerramento operacional controlados.</span>
+      </footer>
+      <p class="source" id="fonteTexto">Fonte: Banco MySQL | Dados consolidados</p>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="frontend/painel-jornada-analitico.js?v=20260521-jornada-mfpmg-v1"></script>
+</body>
+</html>

@@ -187,7 +187,7 @@ body{
 
 .kpi-strip{
   display:grid;
-  grid-template-columns:repeat(9, minmax(118px, 1fr));
+  grid-template-columns:repeat(10, minmax(108px, 1fr));
   gap:8px;
   padding:6px 0 10px;
   border:none;
@@ -260,7 +260,8 @@ body{
 .kpi-item:nth-child(6),
 .kpi-item:nth-child(7),
 .kpi-item:nth-child(8),
-.kpi-item:nth-child(9){
+.kpi-item:nth-child(9),
+.kpi-item:nth-child(10){
   border-top-color:#b43a32;
 }
 
@@ -337,6 +338,14 @@ body{
   font-size:22px;
 }
 
+.subtitulo-exportacao-imagem{
+  margin-top:4px;
+  color:#536a82;
+  font-size:11px;
+  font-weight:800;
+  text-transform:uppercase;
+}
+
 .periodo-exportacao-imagem{
   color:#142a40;
   font-size:14px;
@@ -345,7 +354,7 @@ body{
 }
 
 .area-exportacao-imagem .kpi-strip{
-  grid-template-columns:repeat(9, minmax(130px, 1fr));
+  grid-template-columns:repeat(10, minmax(118px, 1fr));
   margin-bottom:12px;
   padding:0;
 }
@@ -367,9 +376,26 @@ body{
   position:static;
 }
 
+.area-exportacao-imagem #tabelaRelatorio th:first-child,
+.area-exportacao-imagem #tabelaRelatorio th:nth-child(2),
 .area-exportacao-imagem #tabelaRelatorio td:first-child,
-.area-exportacao-imagem #tabelaRelatorio th:first-child{
+.area-exportacao-imagem #tabelaRelatorio td:nth-child(2),
+.area-exportacao-imagem #tabelaRelatorio tfoot td:first-child,
+.area-exportacao-imagem #tabelaRelatorio tfoot td:nth-child(2){
   position:static;
+  left:auto;
+  z-index:auto;
+}
+
+.area-exportacao-imagem #tabelaRelatorio th:nth-child(2),
+.area-exportacao-imagem #tabelaRelatorio td:nth-child(2){
+  min-width:330px;
+  max-width:330px;
+}
+
+.area-exportacao-imagem #tabelaRelatorio th:last-child,
+.area-exportacao-imagem #tabelaRelatorio td:last-child{
+  min-width:150px;
 }
 
 .table-stage{
@@ -762,6 +788,214 @@ body{
   background:#fff;
 }
 
+.modal-export-host{
+  position:absolute;
+  left:-100000px;
+  top:0;
+  z-index:-1;
+  background:#fff;
+  pointer-events:none;
+}
+
+.modal-content-exportacao{
+  box-sizing:border-box;
+  overflow:visible;
+  padding:24px 26px 26px;
+  border:1px solid #c9d8e8;
+  border-radius:12px;
+  background:#f8fbff;
+  box-shadow:none;
+}
+
+.modal-content-exportacao h2{
+  margin:0 0 10px;
+  color:#18344f;
+  font-size:24px;
+  line-height:1.2;
+  font-weight:900;
+}
+
+.modal-content-exportacao #modalBody{
+  color:#24415f;
+  font-size:12px;
+  line-height:1.35;
+}
+
+.modal-content-exportacao .modal-tabela-resumo{
+  display:inline-flex;
+  align-items:center;
+  min-height:28px;
+  margin:2px 0 12px;
+  padding:0 12px;
+  border:1px solid #b8cce1;
+  border-radius:999px;
+  background:#e7f0fa;
+  color:#173d63;
+  font-size:12px;
+  letter-spacing:0;
+}
+
+.modal-content-exportacao .modal-tabela-wrap{
+  overflow:hidden !important;
+  border:1px solid #c8d7e6;
+  border-radius:10px;
+  background:#fff;
+  box-shadow:none;
+}
+
+.modal-content-exportacao .tabela-historico-equipe th,
+.modal-content-exportacao .tabela-historico-equipe tfoot td{
+  position:static;
+}
+
+.modal-content-exportacao .tabela-historico-equipe{
+  min-width:2360px;
+  table-layout:fixed;
+  border-collapse:separate;
+  border-spacing:0;
+  background:#fff;
+}
+
+.modal-content-exportacao .tabela-historico-equipe th{
+  padding:10px 8px;
+  border-right:1px solid rgba(255,255,255,0.2);
+  border-bottom:1px solid #163758;
+  background:#173d63;
+  color:#fff;
+  font-size:10px;
+  line-height:1.2;
+  letter-spacing:0;
+  white-space:normal;
+  word-break:normal;
+}
+
+.modal-content-exportacao .tabela-historico-equipe td{
+  padding:10px 9px;
+  border-right:1px solid #d8e2ec;
+  border-bottom:1px solid #d8e2ec;
+  color:#24415f;
+  font-size:11px;
+  line-height:1.25;
+}
+
+.modal-content-exportacao .tabela-historico-equipe tbody tr:nth-child(even) td:not([class*="status-"]){
+  background:#f8fbff;
+}
+
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(2){
+  padding-left:12px;
+  color:#173d63;
+  font-weight:900;
+}
+
+.modal-content-exportacao .tabela-historico-equipe td[class*="status-"]{
+  color:#fff;
+  font-size:11px;
+  line-height:1.25;
+  font-weight:900;
+  text-align:center;
+  text-transform:uppercase;
+}
+
+.modal-content-exportacao .tabela-historico-equipe tfoot td{
+  padding:11px 9px;
+  border-top:2px solid #9eb8d2;
+  background:#dbeaf8;
+  color:#123a5f;
+  font-size:11px;
+  font-weight:900;
+}
+
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(1),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(1){ width:110px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(2),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(2){ width:430px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(3),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(3){ width:120px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(4),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(4){ width:150px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(5),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(5){ width:105px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(6),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(6){ width:160px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(7),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(7){ width:120px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(8),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(8){ width:125px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(9),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(9){ width:160px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(10),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(10){ width:115px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(11),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(11){ width:190px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(12),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(12){ width:125px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(13),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(13){ width:145px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(14),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(14){ width:115px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(15),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(15){ width:105px; }
+.modal-content-exportacao .tabela-historico-equipe th:nth-child(16),
+.modal-content-exportacao .tabela-historico-equipe td:nth-child(16){ width:155px; }
+
+.modal-assinaturas-exportacao{
+  display:grid;
+  grid-template-columns:minmax(360px, 420px) minmax(760px, 860px);
+  justify-content:center;
+  align-items:start;
+  gap:72px;
+  margin:34px auto 0;
+  padding:22px 36px 2px;
+  color:#173d63;
+}
+
+.modal-assinaturas-grupo{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(320px, 1fr));
+  gap:28px;
+  justify-items:center;
+}
+
+.modal-assinaturas-titulo{
+  grid-column:1 / -1;
+  width:100%;
+  margin-bottom:4px;
+  color:#48637d;
+  font-size:11px;
+  font-weight:900;
+  text-align:center;
+  text-transform:uppercase;
+}
+
+.modal-assinatura-item{
+  width:100%;
+  max-width:420px;
+  min-height:76px;
+  margin:0 auto;
+  text-align:center;
+}
+
+.modal-assinatura-linha{
+  height:38px;
+  border-bottom:2px solid #6f879f;
+}
+
+.modal-assinatura-label{
+  margin-top:7px;
+  color:#173d63;
+  font-size:12px;
+  font-weight:900;
+  text-transform:uppercase;
+}
+
+.modal-assinatura-nome{
+  margin-top:3px;
+  color:#48637d;
+  font-size:11px;
+  font-weight:700;
+}
+
 .modal-content h2{
   margin-bottom:10px;
   font-size:18px;
@@ -778,6 +1012,24 @@ body{
   color:var(--text);
   font-size:18px;
   cursor:pointer;
+}
+
+.modal-fullscreen-btn{
+  position:absolute;
+  top:10px;
+  right:45px;
+  width:28px;
+  height:28px;
+  border:none;
+  background:#e9eff5;
+  color:var(--text);
+  font-size:18px;
+  cursor:pointer;
+}
+
+.modal-fullscreen-btn:hover,
+.modal-close:hover{
+  background:#d4dce3;
 }
 
 #modalBody{
@@ -802,15 +1054,134 @@ body{
   cursor:pointer;
 }
 
+.modal-actions{
+  margin-top:10px;
+  text-align:center;
+}
+
+#btnDownloadModal{
+  padding:8px 16px;
+  background:var(--navy);
+  color:white;
+  border:none;
+  border-radius:3px;
+  cursor:pointer;
+  font-size:13px;
+  font-weight:bold;
+}
+
+#btnDownloadModal:hover{
+  background:#2c4563;
+}
+
 .modal-tabela-wrap{
   width:100%;
   max-height:72vh;
   overflow:auto;
   border:1px solid var(--line);
+  border-radius:12px;
+  background:#fff;
+  box-shadow:0 12px 30px rgba(0,0,0,0.06);
+}
+
+.modal-top5-grid{
+  display:grid;
+  gap:18px;
+  grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.modal-top5-card{
+  border:1px solid rgba(15,47,78,0.12);
+  border-radius:16px;
+  padding:16px;
+  background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow:0 10px 30px rgba(15,47,78,0.08);
+}
+
+.modal-top5-card h3{
+  margin:0 0 14px;
+  font-size:15px;
+  font-weight:700;
+  color:#102d4c;
+}
+
+.modal-top5-card table{
+  width:100%;
+  border-collapse:collapse;
+  background:#fff;
+}
+
+.modal-top5-card th,
+.modal-top5-card td{
+  padding:10px 12px;
+  border-bottom:1px solid rgba(15,47,78,0.12);
+  font-size:13px;
+  text-align:left;
+}
+
+.modal-top5-card th{
+  background:rgba(15,47,78,0.08);
+  color:#0f2f4e;
+  text-transform:uppercase;
+  letter-spacing:0.04em;
+  font-weight:700;
+}
+
+.modal-top5-card tbody tr:last-child td{
+  border-bottom:none;
+}
+
+.modal-top5-card tbody tr:nth-child(even){
+  background:rgba(15,47,78,0.03);
+}
+
+.modal-top5-card td:nth-child(1){
+  width:54px;
+  font-weight:700;
+}
+
+.modal-top5-card td:nth-child(3){
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+}
+
+.modal.fullscreen .modal-tabela-wrap{
+  max-height:calc(100vh - 200px);
 }
 
 .modal-content:has(.tabela-historico-equipe){
   width:min(96vw, 1500px);
+}
+
+.modal.fullscreen .modal-content{
+  width:100vw;
+  max-width:100%;
+  height:100vh;
+  max-height:100vh;
+  display:flex;
+  flex-direction:column;
+  padding:15px;
+  border:none;
+  border-radius:0;
+}
+
+.modal.fullscreen .modal-content h2{
+  flex-shrink:0;
+  margin-bottom:10px;
+}
+
+.modal.fullscreen #modalBody{
+  flex:1;
+  overflow:auto;
+  display:flex;
+  flex-direction:column;
+}
+
+.modal.fullscreen .modal-actions{
+  flex-shrink:0;
+  margin-top:10px;
+  padding-top:10px;
+  border-top:1px solid var(--line);
 }
 
 .tabela-historico-equipe{
@@ -846,12 +1217,29 @@ body{
 
 .btn-filtro-modal-jornada{
   width:100%;
-  min-height:38px;
+  min-height:24px;
   display:flex;
   align-items:center;
   justify-content:center;
   gap:5px;
-  padding:9px 7px;
+  padding:4px 7px;
+  border:0;
+  background:transparent;
+  color:inherit;
+  font:inherit;
+  letter-spacing:inherit;
+  text-transform:inherit;
+  cursor:pointer;
+}
+
+.btn-ordenar-modal-historico{
+  width:100%;
+  min-height:34px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  padding:8px 7px 3px;
   border:0;
   background:transparent;
   color:inherit;
@@ -862,6 +1250,10 @@ body{
 }
 
 .btn-filtro-modal-jornada:hover{
+  background:rgba(255,255,255,0.08);
+}
+
+.btn-ordenar-modal-historico:hover{
   background:rgba(255,255,255,0.08);
 }
 
@@ -927,6 +1319,41 @@ body{
   min-width:280px;
   text-align:left;
   font-weight:800;
+}
+
+.tabela-historico-equipe tfoot td{
+  position:sticky;
+  bottom:0;
+  z-index:3;
+  padding:8px 7px;
+  border-right:1px solid #c7d6e5;
+  border-top:2px solid #9eb4cc;
+  background:#dceaf8;
+  color:var(--navy);
+  text-align:center;
+  font-size:10px;
+  font-weight:900;
+  text-transform:uppercase;
+}
+
+.tabela-historico-equipe tfoot td:nth-child(2){
+  text-align:left;
+}
+
+.tabela-historico-equipe tfoot td.status-normal,
+.tabela-historico-equipe tfoot td.status-inc,
+.tabela-historico-equipe tfoot td.status-divergencia,
+.tabela-historico-equipe tfoot td.status-acima,
+.tabela-historico-equipe tfoot td.status-incompleta,
+.tabela-historico-equipe tfoot td.status-excessivo,
+.tabela-historico-equipe tfoot td.status-atrasado,
+.tabela-historico-equipe tfoot td.status-nao,
+.tabela-historico-equipe tfoot td.status-nao-registrada,
+.tabela-historico-equipe tfoot td.status-andamento,
+.tabela-historico-equipe tfoot td.status-aguardando,
+.tabela-historico-equipe tfoot td.status-sem-encerramento,
+.tabela-historico-equipe tfoot td.status-atraso{
+  color:#fff;
 }
 
 #btnDownloadModal{

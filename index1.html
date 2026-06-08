@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ANDON Dashboard</title>
-  <link rel="stylesheet" href="styles1.css">
+  <link rel="stylesheet" href="styles1.css?v=20260519-sem-servico-meta">
 </head>
 <body>
   <div class="app-shell">
@@ -12,6 +12,10 @@
       <button type="button" id="andonMenuButton" class="andon-menu-button" aria-label="Abrir menu">
         <span class="andon-menu-icon" aria-hidden="true"></span>
         <span>Menu</span>
+      </button>
+      <button type="button" id="andonExportImageButton" class="andon-export-button" title="Exportar imagem do ANDON">
+        <span>PNG</span>
+        <strong>Exportar imagem</strong>
       </button>
       <div class="brand">
         <span class="brand-title">VISÃO PCP</span>
@@ -49,6 +53,14 @@
             <input id="headerSupervisorDisplay" type="text" readonly placeholder="Todos" class="header-filter-input header-filter-input-wide">
             <button type="button" id="headerSupervisorClear" class="header-filter-clear" aria-label="Limpar supervisor">×</button>
             <div id="headerSupervisorPopup" class="header-filter-popup header-filter-options hidden"></div>
+          </div>
+        </div>
+        <div class="header-filter-group">
+          <span class="header-filter-label">TURNO</span>
+          <div class="header-filter-picker-wrapper" id="headerTurnoWrapper">
+            <input id="headerTurnoDisplay" type="text" readonly placeholder="Todos" class="header-filter-input">
+            <button type="button" id="headerTurnoClear" class="header-filter-clear" aria-label="Limpar turno">×</button>
+            <div id="headerTurnoPopup" class="header-filter-popup header-filter-options hidden"></div>
           </div>
         </div>
       </div>
@@ -113,6 +125,8 @@
           <div class="grid-card"><span class="card-label">SERVIÇOS PRODUTIVO</span><div class="value">28</div></div>
           <div class="grid-card"><span class="card-label">SERVIÇOS IMPRODUTIVOS</span><div class="value">7</div></div>
           <div class="grid-card"><span class="card-label">% SERV. IMPROD.</span><div class="value">20%</div></div>
+          <div class="grid-card"><span class="card-label">% IMPROD. MOTO</span><div class="value">0,00%</div></div>
+          <div class="grid-card"><span class="card-label">% IMPROD. MULTI</span><div class="value">0,00%</div></div>
           <div class="grid-card"><span class="card-label">MED. SERVIÇO POR EQP.</span><div class="value">--</div></div>
           <div class="grid-card"><span class="card-label">EQUIPE SEM SERVIÇO</span><div class="value">--</div></div>
         </div>
@@ -945,6 +959,13 @@
           <small>Dashboard atual</small>
         </span>
       </button>
+      <button type="button" class="andon-menu-item" data-menu-action="exportar-imagem">
+        <span class="andon-menu-letter">PNG</span>
+        <span>
+          <strong>Exportar imagem</strong>
+          <small>Baixar tela atual do ANDON</small>
+        </span>
+      </button>
       <button type="button" class="andon-menu-item" data-menu-action="supervisores">
         <span class="andon-menu-letter">S</span>
         <span>
@@ -997,6 +1018,6 @@
     </div>
   </div>
 
-  <script src="script1.js"></script>
+  <script src="script1.js?v=20260519-filtro-turno"></script>
 </body>
 </html>

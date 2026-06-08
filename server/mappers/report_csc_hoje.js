@@ -134,6 +134,7 @@ function mapReportCscHojeRow(dbRow) {
     Executados: dbRow.EXECUTADOS ?? "",
     Produtivos: dbRow.PRODUTIVOS ?? "",
     Nome: nomeEquipe,
+    NOME_EQUIPE: nomeEquipe,
 
     // UO/equipe (inclui variantes para compatibilidade com encoding)
     "Cód.UO": codUo,
@@ -145,6 +146,7 @@ function mapReportCscHojeRow(dbRow) {
     "CÃƒÂ³d. Equipe": codEquipe,
 
     NUM_EQUIPE: numEquipe,
+    TIPO_EQUIPE: firstNonEmpty(dbRow.TIPO_EQUIPE, dbRow.TIPO, dbRow.TIPO_VEICULO, dbRow.MODALIDADE, dbRow.PERFIL_EQUIPE),
 
     "SUPERVISOR - SETOR": normalizeSpaces(dbRow.NOME_SUPERVISOR ?? ""),
     "LIDER DE POSTO - SETOR": normalizeSpaces(dbRow.NOME_LIDER ?? ""),

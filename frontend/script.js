@@ -112,6 +112,7 @@ const HORARIOS_ENTRADA = {
 const TOLERANCIA_ENTRADA_MIN = 15;
 const LIMITE_REFEICAO_MIN = 60;
 const REFEICAO_OBRIGATORIA_APOS_MIN = 240;
+const JORNADA_PRODUTIVA_NORMAL_MIN = 450;
 const JORNADA_TRABALHO_MIN = 600;
 const TOLERANCIA_JORNADA_MIN = 15;
 const SEM_ENCERRAMENTO_APOS_MIN = 120;
@@ -234,6 +235,7 @@ function normalizarRegistro(r) {
     LIDER_CONTROLADOR: String(LID || "").trim(),
     NOME_CONTROLADOR: String(CTRL || "").trim(),
     NOME_EQUIPE,
+    CLASSIFICACAO_EXEC_META: String(r.CLASSIFICACAO_EXEC_META ?? r.COD_CLASSIFICACAO_DINAMICO ?? "").trim(),
     COD_CLASSIFICACAO_DINAMICO: String(r.COD_CLASSIFICACAO_DINAMICO || "").trim(),
     HORA: r.HORA ?? "",
     HORA_TURNO: horaTurno,
@@ -395,7 +397,7 @@ function calcularStatusPorMeta(reg) {
   let JORNADA_PROD_TXT = "";
   if (MIN_JORNADA_PROD !== null && MIN_JORNADA_PROD >= 0) {
     JORNADA_PROD_TXT = minToHHMM(MIN_JORNADA_PROD);
-    STATUS_PROD = MIN_JORNADA_PROD >= 420 ? "COMPLETA" : "INCOMPLETA";
+    STATUS_PROD = MIN_JORNADA_PROD >= JORNADA_PRODUTIVA_NORMAL_MIN ? "COMPLETA" : "INCOMPLETA";
   }
 
   if (inicio) {
@@ -483,16 +485,19 @@ function registrarEventosUmaVez() {
   bindKpi("kpiAtrasoInicio", "ATRASO_INICIO");
   bindKpi("kpiDemoraAtend", "DEMORA_ATEND");
   bindKpi("kpiDesvioUltAtend", "DESVIO_ULT");
+  bindKpi("kpiJornadaProdIncompleta", "JORNADA_PROD_INCOMPLETA");
   bindKpi("kpiJornadaIncompleta", "JORNADA_INCOMPLETA");
 
   const modal = document.getElementById("modalDetalhes");
   const btnFecharModal = document.getElementById("modalClose");
+  const btnFullscreenModal = document.getElementById("btnFullscreenModal");
   const btnDownloadModal = document.getElementById("btnDownloadModal");
   const btnExportarTabelaImagem = document.getElementById("btnExportarTabelaImagem");
   if (modal) {
     modal.addEventListener("click", (e) => {
       if (e.target === modal) {
         modal.classList.remove("aberto");
+        modal.classList.remove("fullscreen");
         modal.style.paddingTop = "";
         const titulo = modal.querySelector("h2");
         if (titulo) titulo.textContent = "Detalhes da Equipe";
@@ -503,34 +508,160 @@ function registrarEventosUmaVez() {
     btnFecharModal.addEventListener("click", () => {
       if (!modal) return;
       modal.classList.remove("aberto");
+      modal.classList.remove("fullscreen");
       modal.style.paddingTop = "";
       const titulo = modal.querySelector("h2");
       if (titulo) titulo.textContent = "Detalhes da Equipe";
     });
   }
-  if (btnDownloadModal && btnDownloadModal.dataset.bound !== "true") {
-    btnDownloadModal.dataset.bound = "true";
-    btnDownloadModal.addEventListener("click", () => {
-      const area = modal?.querySelector(".modal-content");
-      if (!area || !window.html2canvas) return exibirStatus("html2canvas não carregado", "erro");
-
-      html2canvas(area, { backgroundColor: "white", scale: 2 })
-        .then(canvas => {
-          const link = document.createElement("a");
-          link.href = canvas.toDataURL("image/png");
-          link.download = `modal_${hojeISO()}.png`;
-          link.click();
-          exibirStatus("Imagem do modal gerada");
-        })
-        .catch(err => {
-          exibirStatus("Falha ao gerar imagem", "erro");
-          console.error(err);
-        });
+  if (btnFullscreenModal) {
+    btnFullscreenModal.addEventListener("click", () => {
+      if (!modal) return;
+      modal.classList.toggle("fullscreen");
+      if (!modal.classList.contains("fullscreen")) {
+        modal.style.paddingTop = "";
+      }
     });
   }
+  if (btnDownloadModal && btnDownloadModal.dataset.bound !== "true") {
+    btnDownloadModal.dataset.bound = "true";
+    btnDownloadModal.addEventListener("click", () => exportarImagemModalDetalhes(modal));
+  }
+  const btnTop5MetricasJornada = document.getElementById("btnTop5MetricasJornada");
   if (btnExportarTabelaImagem && btnExportarTabelaImagem.dataset.bound !== "true") {
     btnExportarTabelaImagem.dataset.bound = "true";
     btnExportarTabelaImagem.addEventListener("click", exportarTabelaComoImagem);
+  }
+  if (btnTop5MetricasJornada && btnTop5MetricasJornada.dataset.bound !== "true") {
+    btnTop5MetricasJornada.dataset.bound = "true";
+    btnTop5MetricasJornada.addEventListener("click", abrirModalTop5MetricasJornada);
+  }
+}
+
+function limparControlesModalExportacao(area) {
+  area.querySelectorAll(".modal-close, .modal-fullscreen-btn, .modal-actions").forEach(el => el.remove());
+  area.querySelectorAll(".dropdown-filtro-modal-jornada, .btn-filtro-modal-jornada").forEach(el => el.remove());
+  area.querySelectorAll(".th-filtro-modal-jornada").forEach((th) => {
+    const labelEl = th.querySelector(".btn-ordenar-modal-historico span");
+    const label = labelEl
+      ? labelEl.innerHTML.replace(/<br\s*\/?>/gi, " ").replace(/\s+/g, " ").trim()
+      : th.textContent.replace(/\s+/g, " ").trim();
+    th.textContent = label;
+  });
+}
+
+function adicionarAssinaturasModalExportacao(area, modal) {
+  const supervisor = modal?.dataset.assinaturaSupervisor || "";
+  const equipe = modal?.dataset.assinaturaEquipe || "";
+  const lider = modal?.dataset.assinaturaLider || "";
+  const controlador = modal?.dataset.assinaturaControlador || "";
+  const membros = [
+    { label: "Equipe", nome: equipe },
+    { label: "Lider", nome: lider },
+    { label: "Controlador", nome: controlador }
+  ].filter((item, index, lista) =>
+    item.nome && lista.findIndex(outro => outro.nome === item.nome) === index
+  );
+
+  const assinaturas = document.createElement("div");
+  assinaturas.className = "modal-assinaturas-exportacao";
+
+  const criarAssinatura = (label, nome) => {
+    const item = document.createElement("div");
+    item.className = "modal-assinatura-item";
+    item.innerHTML = `
+      <div class="modal-assinatura-linha"></div>
+      <div class="modal-assinatura-label"></div>
+      <div class="modal-assinatura-nome"></div>
+    `;
+    item.querySelector(".modal-assinatura-label").textContent = label;
+    item.querySelector(".modal-assinatura-nome").textContent = nome || " ";
+    return item;
+  };
+
+  assinaturas.appendChild(criarAssinatura("Supervisor", supervisor));
+
+  const grupo = document.createElement("div");
+  grupo.className = "modal-assinaturas-grupo";
+  const titulo = document.createElement("div");
+  titulo.className = "modal-assinaturas-titulo";
+  titulo.textContent = "Membros da equipe";
+  grupo.appendChild(titulo);
+  const membrosAssinatura = [
+    membros[0] || { label: "Membro 1", nome: "" },
+    membros[1] || { label: "Membro 2", nome: "" }
+  ];
+  membrosAssinatura.forEach((item, index) => {
+    grupo.appendChild(criarAssinatura(item.label || `Membro ${index + 1}`, item.nome || ""));
+  });
+  assinaturas.appendChild(grupo);
+
+  area.appendChild(assinaturas);
+}
+
+async function exportarImagemModalDetalhes(modal) {
+  const areaOriginal = modal?.querySelector(".modal-content");
+  if (!areaOriginal || !window.html2canvas) {
+    exibirStatus("html2canvas nao carregado", "erro");
+    return;
+  }
+
+  const host = document.createElement("div");
+  host.className = "modal-export-host";
+
+  const area = areaOriginal.cloneNode(true);
+  area.classList.remove("fullscreen");
+  area.classList.add("modal-content-exportacao");
+  limparControlesModalExportacao(area);
+  adicionarAssinaturasModalExportacao(area, modal);
+  host.appendChild(area);
+  document.body.appendChild(host);
+
+  try {
+    await document.fonts?.ready;
+    const tabelaWrap = area.querySelector(".modal-tabela-wrap");
+    const tabela = area.querySelector(".tabela-historico-equipe, .modal-tabela");
+    const larguraTabela = tabela ? Math.ceil(tabela.scrollWidth || tabela.offsetWidth || 0) : 0;
+    const larguraExportacao = Math.ceil(Math.max(area.scrollWidth, larguraTabela + 36, 900));
+
+    area.style.width = `${larguraExportacao}px`;
+    area.style.maxWidth = "none";
+    area.style.height = "auto";
+    area.style.maxHeight = "none";
+
+    if (tabelaWrap) {
+      tabelaWrap.style.width = larguraTabela ? `${larguraTabela}px` : "100%";
+      tabelaWrap.style.maxHeight = "none";
+      tabelaWrap.style.height = "auto";
+      tabelaWrap.style.overflow = "visible";
+    }
+
+    if (tabela) {
+      tabela.style.width = larguraTabela ? `${larguraTabela}px` : "100%";
+      tabela.style.minWidth = larguraTabela ? `${larguraTabela}px` : "";
+    }
+
+    const canvas = await html2canvas(area, {
+      backgroundColor: "#ffffff",
+      scale: 3,
+      allowTaint: true,
+      useCORS: true,
+      windowWidth: Math.ceil(area.scrollWidth),
+      windowHeight: Math.ceil(area.scrollHeight),
+      scrollX: 0,
+      scrollY: 0
+    });
+
+    const link = document.createElement("a");
+    link.href = canvas.toDataURL("image/png");
+    link.download = `modal_${hojeISO()}.png`;
+    link.click();
+    exibirStatus("Imagem do modal gerada em alta qualidade.");
+  } catch (err) {
+    console.error(err);
+    exibirStatus("Falha ao gerar imagem do modal.", "erro");
+  } finally {
+    host.remove();
   }
 }
 
@@ -541,6 +672,7 @@ function exportarTabelaComoImagem() {
     return;
   }
 
+  const contexto = obterContextoExportacao();
   const area = document.createElement("div");
   area.className = "area-exportacao-imagem";
   area.innerHTML = `
@@ -552,6 +684,15 @@ function exportarTabelaComoImagem() {
       <div class="periodo-exportacao-imagem">${safe(obterTextoPeriodoExportacao())}</div>
     </div>
   `;
+
+  const tituloExportacao = area.querySelector(".cabecalho-exportacao-imagem strong");
+  if (tituloExportacao) {
+    tituloExportacao.textContent = contexto.titulo;
+    const subtitulo = document.createElement("div");
+    subtitulo.className = "subtitulo-exportacao-imagem";
+    subtitulo.textContent = contexto.subtitulo;
+    tituloExportacao.insertAdjacentElement("afterend", subtitulo);
+  }
 
   const kpis = document.querySelector(".kpi-strip");
   if (kpis) {
@@ -593,6 +734,71 @@ function exportarTabelaComoImagem() {
     .finally(() => {
       area.remove();
     });
+}
+
+function obterContextoExportacao() {
+  const lista = obterListaTabelaAtual();
+  const identificador = obterIdentificadorExportacao(lista);
+  const supervisor = obterSupervisorExportacao(lista);
+  const kpi = obterRotuloKpiAtivo();
+
+  return {
+    titulo: `Painel Analítico | ${identificador} | ${supervisor} | KPI: ${kpi}`,
+    subtitulo: `${lista.length} equipe${lista.length === 1 ? "" : "s"} no filtro atual`
+  };
+}
+
+function obterListaTabelaAtual() {
+  let lista = agruparPorEquipe(aplicarFiltros());
+  lista = aplicarFiltroKpi(lista);
+  lista = aplicarFiltrosColuna(lista);
+  return ordenarListaTabela(lista);
+}
+
+function obterIdentificadorExportacao(lista) {
+  const uo = valor("filtroUO");
+  if (uo) return `Identificador: UO ${uo}`;
+
+  const clusters = [...new Set(
+    lista
+      .map(row => extrairCluster(row.NOME_EQUIPE) || row.CLUSTER || "")
+      .map(v => String(v || "").trim())
+      .filter(Boolean)
+  )];
+
+  if (clusters.length === 1) return `Identificador: ${clusters[0]}`;
+  if (clusters.length > 1) return "Identificador: Geral";
+  return "Identificador: Sem filtro";
+}
+
+function obterSupervisorExportacao(lista) {
+  const selecionado = valor("filtroSupervisor");
+  if (selecionado) return `Supervisor: ${selecionado}`;
+
+  const supervisores = [...new Set(
+    lista
+      .map(row => String(row.SUPERVISOR_EQUIPE || "").trim())
+      .filter(Boolean)
+  )];
+
+  if (supervisores.length === 1) return `Supervisor: ${supervisores[0]}`;
+  return "Supervisor: Todos";
+}
+
+function obterRotuloKpiAtivo() {
+  const rotulos = {
+    TOTAL: "Total de Eqp. Dia",
+    D: "Total de Eqp. D Dia",
+    NAO_INICIADA: "Eqps. Jornada Não Iniciada",
+    EFETIVA: "Total de Eqp. Efetiva Dia",
+    ATRASO_INICIO: "Atraso Início Jornada",
+    DEMORA_ATEND: "Demora 1º Atend.",
+    DESVIO_ULT: "Desvio Ult. Atend.",
+    JORNADA_PROD_INCOMPLETA: "Jornada Prod. Incompleta",
+    JORNADA_INCOMPLETA: "Jornada Incompleta"
+  };
+
+  return rotulos[filtroKpiAtivo] || "Nenhuma";
 }
 
 function exportarParaCsv(dadosCsv) {
@@ -947,6 +1153,8 @@ function consolidarMediaEquipePeriodo(grupo) {
 
   const consolidado = {
     ...principal,
+    CLASSIFICACAO_EXEC_META: classificacaoMediaPeriodo(registrosDia),
+    COD_CLASSIFICACAO_DINAMICO: classificacaoMediaPeriodo(registrosDia),
     INICIO_JORNADA: mediaHora("INICIO_JORNADA"),
     PRIMEIRO_ATENDIMENTO: mediaHora("PRIMEIRO_ATENDIMENTO"),
     INICIO_REFEICAO: mediaHora("INICIO_REFEICAO"),
@@ -975,6 +1183,22 @@ function consolidarMediaEquipePeriodo(grupo) {
     ...consolidado,
     ...statusMedia
   };
+}
+
+function classificacaoMediaPeriodo(registrosDia) {
+  const pesos = { A: 4, B: 3, C: 2, D: 1 };
+  const porPeso = { 4: "A", 3: "B", 2: "C", 1: "D" };
+  const valores = registrosDia
+    .filter(row => !!row.INICIO_JORNADA)
+    .map(row => normalizarTextoComparacao(row.CLASSIFICACAO_EXEC_META || row.COD_CLASSIFICACAO_DINAMICO))
+    .map(valor => valor.charAt(0))
+    .filter(valor => Object.prototype.hasOwnProperty.call(pesos, valor));
+
+  if (!valores.length) return "";
+
+  const media = valores.reduce((total, valor) => total + pesos[valor], 0) / valores.length;
+  const pesoArredondado = Math.max(1, Math.min(4, Math.round(media)));
+  return porPeso[pesoArredondado] || "";
 }
 
 function minParaHoraMedia(valores) {
@@ -1059,7 +1283,7 @@ function calcularStatusMediaPeriodo(reg, medias) {
   }
 
   const STATUS_PROD = medias.minJornadaProd !== null
-    ? (medias.minJornadaProd >= 420 ? "COMPLETA" : "INCOMPLETA")
+    ? (medias.minJornadaProd >= JORNADA_PRODUTIVA_NORMAL_MIN ? "COMPLETA" : "INCOMPLETA")
     : "";
 
   let STATUS_JORNADA = "NÃO INICIADA";
@@ -1224,7 +1448,7 @@ function calcularResumoRodapeTabela(lista) {
     STATUS_FINAL: status.STATUS_ULTIMO || "-",
     JORNADA_PROD: mediaJornadaProd,
     STATUS_PROD: Number.isFinite(hhmmToMin(mediaJornadaProd))
-      ? (hhmmToMin(mediaJornadaProd) >= 420 ? "COMPLETA" : "INCOMPLETA")
+      ? (hhmmToMin(mediaJornadaProd) >= JORNADA_PRODUTIVA_NORMAL_MIN ? "COMPLETA" : "INCOMPLETA")
       : (status.STATUS_PROD || "-"),
     FIM_JORNADA: registroMedio.FIM_JORNADA || "-",
     JORNADA: mediaHoraCampo(lista, "JORNADA"),
@@ -1273,7 +1497,7 @@ function preencherTabela() {
   let lista = agruparPorEquipe(aplicarFiltros());
 
   if (filtroKpiAtivo === "D") {
-    lista = lista.filter(l => String(l.COD_CLASSIFICACAO_DINAMICO || "") === "D");
+    lista = lista.filter(equipeEhClassificacaoD);
   }
   if (filtroKpiAtivo === "NAO_INICIADA") {
     lista = lista.filter(l => !l.INICIO_JORNADA);
@@ -1289,6 +1513,9 @@ function preencherTabela() {
   }
   if (filtroKpiAtivo === "DESVIO_ULT") {
     lista = lista.filter(l => l.STATUS_FINAL === "TEMPO PARADO EXCESSIVO");
+  }
+  if (filtroKpiAtivo === "JORNADA_PROD_INCOMPLETA") {
+    lista = lista.filter(l => l.STATUS_PROD === "INCOMPLETA");
   }
   if (filtroKpiAtivo === "JORNADA_INCOMPLETA") {
     lista = lista.filter(l => ["INCOMPLETA", "SEM ENCERRAMENTO"].includes(l.STATUS_JORNADA));
@@ -1353,23 +1580,7 @@ function preencherTabela() {
   const btnDownloadModal = document.getElementById("btnDownloadModal");
   if (btnDownloadModal && btnDownloadModal.dataset.bound !== "true") {
     btnDownloadModal.dataset.bound = "true";
-    btnDownloadModal.addEventListener("click", () => {
-      const area = modal?.querySelector(".modal-content");
-      if (!area || !window.html2canvas) return exibirStatus("html2canvas não carregado", "erro");
-
-      html2canvas(area, { backgroundColor: "white", scale: 2 })
-        .then(canvas => {
-          const link = document.createElement("a");
-          link.href = canvas.toDataURL("image/png");
-          link.download = `modal_${hojeISO()}.png`;
-          link.click();
-          exibirStatus("Imagem do modal gerada");
-        })
-        .catch(err => {
-          exibirStatus("Falha ao gerar imagem", "erro");
-          console.error(err);
-        });
-    });
+    btnDownloadModal.addEventListener("click", () => exportarImagemModalDetalhes(modal));
   }
 
   lista.forEach(l => {
@@ -1412,12 +1623,45 @@ function preencherTabela() {
   renderizarRodapeTabela(lista);
 }
 
+function aplicarFiltroKpi(lista) {
+  if (filtroKpiAtivo === "D") {
+    return lista.filter(equipeEhClassificacaoD);
+  }
+  if (filtroKpiAtivo === "NAO_INICIADA") {
+    return lista.filter(l => !l.INICIO_JORNADA);
+  }
+  if (filtroKpiAtivo === "EFETIVA") {
+    return lista.filter(l => !!l.INICIO_JORNADA);
+  }
+  if (filtroKpiAtivo === "ATRASO_INICIO") {
+    return lista.filter(l => normalizarTextoComparacao(l.STATUS_INICIO) === "DIVERGENCIA");
+  }
+  if (filtroKpiAtivo === "DEMORA_ATEND") {
+    return lista.filter(l => l.STATUS_PRIMEIRO === "ACIMA DO PREVISTO");
+  }
+  if (filtroKpiAtivo === "DESVIO_ULT") {
+    return lista.filter(l => l.STATUS_FINAL === "TEMPO PARADO EXCESSIVO");
+  }
+  if (filtroKpiAtivo === "JORNADA_PROD_INCOMPLETA") {
+    return lista.filter(l => l.STATUS_PROD === "INCOMPLETA");
+  }
+  if (filtroKpiAtivo === "JORNADA_INCOMPLETA") {
+    return lista.filter(l => ["INCOMPLETA", "SEM ENCERRAMENTO"].includes(l.STATUS_JORNADA));
+  }
+  return lista;
+}
+
 function aplicarFiltrosColuna(lista) {
   const ativos = Object.entries(filtrosColuna).filter(([, valorFiltro]) => valorFiltro);
   if (!ativos.length) return lista;
   return lista.filter((row) =>
     ativos.every(([key, valorFiltro]) => normalizarValorFiltro(row[key]) === String(valorFiltro))
   );
+}
+
+function equipeEhClassificacaoD(linha) {
+  return !!linha.INICIO_JORNADA &&
+    normalizarTextoComparacao(linha.CLASSIFICACAO_EXEC_META || linha.COD_CLASSIFICACAO_DINAMICO) === "D";
 }
 
 function ordenarListaTabela(lista) {
@@ -1453,6 +1697,10 @@ function abrirModalHistoricoEquipePeriodoLegacy(equipeSelecionada, origemEl = nu
     aplicarFiltros().filter(row => mesmoRegistroEquipe(row, equipeSelecionada))
   );
 
+  modal.dataset.assinaturaSupervisor = equipeSelecionada.SUPERVISOR_EQUIPE || "";
+  modal.dataset.assinaturaEquipe = equipeSelecionada.NOME_EQUIPE || "";
+  modal.dataset.assinaturaLider = equipeSelecionada.LIDER_CONTROLADOR || "";
+  modal.dataset.assinaturaControlador = equipeSelecionada.NOME_CONTROLADOR || "";
   modal.querySelector("h2").textContent = `Histórico da Equipe - ${equipeSelecionada.NOME_EQUIPE}`;
   modalBody.innerHTML = `
     <div class="modal-tabela-wrap">
@@ -1533,6 +1781,7 @@ function abrirModalHistoricoEquipePeriodo(equipeSelecionada, origemEl = null) {
     { key: "STATUS_JORNADA", label: "Status", status: true }
   ];
   const filtrosHistorico = {};
+  let ordenacaoHistorico = { key: "", direcao: "asc" };
 
   const valorHistorico = (row, coluna) => normalizarValorFiltro(
     typeof coluna.valor === "function" ? coluna.valor(row) : row[coluna.key]
@@ -1549,14 +1798,123 @@ function abrirModalHistoricoEquipePeriodo(equipeSelecionada, origemEl = null) {
     );
   };
 
+  const valorOrdenacaoHistorico = (row, coluna) => {
+    const valor = valorHistorico(row, coluna);
+    if (coluna.key === "DATA_DIA") {
+      const data = somenteData(row.DATA_DIA);
+      return data ? Date.parse(`${data}T00:00:00`) : Number.NaN;
+    }
+    const minutos = hhmmToMin(valor);
+    if (Number.isFinite(minutos)) return minutos;
+    return valor;
+  };
+
+  const ordenarHistorico = (lista) => {
+    const coluna = colunasHistorico.find(col => col.key === ordenacaoHistorico.key);
+    if (!coluna) return lista;
+    const fator = ordenacaoHistorico.direcao === "desc" ? -1 : 1;
+
+    return [...lista].sort((a, b) => {
+      const va = valorOrdenacaoHistorico(a, coluna);
+      const vb = valorOrdenacaoHistorico(b, coluna);
+      const vazioA = va === "" || va === "-" || (typeof va === "number" && !Number.isFinite(va));
+      const vazioB = vb === "" || vb === "-" || (typeof vb === "number" && !Number.isFinite(vb));
+      if (vazioA && vazioB) return 0;
+      if (vazioA) return 1;
+      if (vazioB) return -1;
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * fator;
+      return String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" }) * fator;
+    });
+  };
+
+  const mediaHoraHistorico = (lista, key) => {
+    const valores = lista.map(row => hhmmToMin(row[key])).filter(Number.isFinite);
+    return minParaHoraMedia(valores) || "-";
+  };
+
+  const montarRodapeHistorico = (lista) => {
+    if (!lista.length) return "";
+    const valorStatus = (valor) => valor === "-" ? "" : valor;
+    const minutosOuNull = (valor) => {
+      const minutos = hhmmToMin(valor);
+      return Number.isFinite(minutos) ? minutos : null;
+    };
+    const resumo = {
+      DATA_DIA: "MEDIA",
+      NOME_EQUIPE: `${lista.length} REGISTROS`,
+      INICIO_JORNADA: mediaHoraHistorico(lista, "INICIO_JORNADA"),
+      PRIMEIRO_ATENDIMENTO: mediaHoraHistorico(lista, "PRIMEIRO_ATENDIMENTO"),
+      INICIO_REFEICAO: mediaHoraHistorico(lista, "INICIO_REFEICAO"),
+      TERMINO_REFEICAO: mediaHoraHistorico(lista, "TERMINO_REFEICAO"),
+      ULTIMO_ATENDIMENTO: mediaHoraHistorico(lista, "ULTIMO_ATENDIMENTO"),
+      JORNADA_PROD: mediaHoraHistorico(lista, "JORNADA_PROD"),
+      FIM_JORNADA: mediaHoraHistorico(lista, "FIM_JORNADA"),
+      JORNADA: mediaHoraHistorico(lista, "JORNADA")
+    };
+    const minP1 = resumo.INICIO_JORNADA !== "-" && resumo.PRIMEIRO_ATENDIMENTO !== "-"
+      ? diffMinComVirada(resumo.INICIO_JORNADA, resumo.PRIMEIRO_ATENDIMENTO, { permitirVirada: true })
+      : null;
+    const minRef = resumo.INICIO_REFEICAO !== "-" && resumo.TERMINO_REFEICAO !== "-"
+      ? diffMinComVirada(resumo.INICIO_REFEICAO, resumo.TERMINO_REFEICAO, { permitirVirada: true })
+      : null;
+    const minUltimo = resumo.ULTIMO_ATENDIMENTO !== "-" && resumo.FIM_JORNADA !== "-"
+      ? diffMinComVirada(resumo.ULTIMO_ATENDIMENTO, resumo.FIM_JORNADA, { permitirVirada: true })
+      : null;
+    const statusMedia = calcularStatusMediaPeriodo(
+      {
+        ...equipeSelecionada,
+        INICIO_JORNADA: valorStatus(resumo.INICIO_JORNADA),
+        PRIMEIRO_ATENDIMENTO: valorStatus(resumo.PRIMEIRO_ATENDIMENTO),
+        INICIO_REFEICAO: valorStatus(resumo.INICIO_REFEICAO),
+        TERMINO_REFEICAO: valorStatus(resumo.TERMINO_REFEICAO),
+        ULTIMO_ATENDIMENTO: valorStatus(resumo.ULTIMO_ATENDIMENTO),
+        FIM_JORNADA: valorStatus(resumo.FIM_JORNADA),
+        JORNADA_PROD: valorStatus(resumo.JORNADA_PROD),
+        JORNADA: valorStatus(resumo.JORNADA)
+      },
+      {
+        minP1,
+        minRef,
+        minUltimo,
+        minJornadaProd: minutosOuNull(resumo.JORNADA_PROD),
+        minJornada: minutosOuNull(resumo.JORNADA)
+      }
+    );
+
+    Object.assign(resumo, {
+      STATUS_INICIO: statusMedia.STATUS_INICIO || "-",
+      STATUS_PRIMEIRO: statusMedia.STATUS_PRIMEIRO || "-",
+      STATUS_REFEICAO: statusMedia.STATUS_REFEICAO || "-",
+      STATUS_FINAL: statusMedia.STATUS_FINAL || "-",
+      STATUS_PROD: statusMedia.STATUS_PROD || "-",
+      STATUS_JORNADA: statusMedia.STATUS_JORNADA || "-"
+    });
+
+    return `
+      <tfoot class="tabela-rodape-medias tabela-rodape-historico">
+        <tr>
+          ${colunasHistorico.map((coluna) => {
+            const valor = resumo[coluna.key] ?? "-";
+            return `<td class="${coluna.status ? classe(valor) : ""}">${safe(valor)}</td>`;
+          }).join("")}
+        </tr>
+      </tfoot>
+    `;
+  };
+
   const renderizarCabecalhoHistorico = () => colunasHistorico.map((coluna) => {
     const valores = [...new Set(rows.map(row => valorHistorico(row, coluna)).filter(Boolean))]
       .sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
     const atual = filtrosHistorico[coluna.key] || "";
+    const ordenacaoAtiva = ordenacaoHistorico.key === coluna.key;
+    const iconeOrdenacao = ordenacaoAtiva ? (ordenacaoHistorico.direcao === "asc" ? "↑" : "↓") : "↕";
     return `
       <th class="th-filtro-modal-jornada${atual ? " filtro-ativo" : ""}" data-coluna-modal="${safeAttr(coluna.key)}">
-        <button class="btn-filtro-modal-jornada" type="button" data-coluna="${safeAttr(coluna.key)}">
+        <button class="btn-ordenar-modal-historico" type="button" data-coluna="${safeAttr(coluna.key)}">
           <span>${coluna.label}</span>
+          <span class="icone-ordenar-cabecalho">${iconeOrdenacao}</span>
+        </button>
+        <button class="btn-filtro-modal-jornada" type="button" data-coluna="${safeAttr(coluna.key)}" aria-label="Filtrar ${safeAttr(coluna.label)}">
           <span class="icone-filtro-cabecalho">v</span>
         </button>
         <div class="dropdown-filtro-modal-jornada" data-dropdown-modal="${safeAttr(coluna.key)}">
@@ -1580,7 +1938,7 @@ function abrirModalHistoricoEquipePeriodo(equipeSelecionada, origemEl = null) {
   };
 
   const renderizarTabelaHistorico = () => {
-    const rowsFiltradas = aplicarFiltrosHistorico();
+    const rowsFiltradas = ordenarHistorico(aplicarFiltrosHistorico());
     modalBody.innerHTML = `
       <div class="modal-tabela-resumo">${rowsFiltradas.length} de ${rows.length} registros</div>
       <div class="modal-tabela-wrap">
@@ -1589,9 +1947,23 @@ function abrirModalHistoricoEquipePeriodo(equipeSelecionada, origemEl = null) {
             <tr>${renderizarCabecalhoHistorico()}</tr>
           </thead>
           <tbody>${renderizarLinhasHistorico(rowsFiltradas)}</tbody>
+          ${montarRodapeHistorico(rowsFiltradas)}
         </table>
       </div>
     `;
+
+    modalBody.querySelectorAll(".btn-ordenar-modal-historico").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const key = btn.dataset.coluna || "";
+        const mesmaColuna = ordenacaoHistorico.key === key;
+        ordenacaoHistorico = {
+          key,
+          direcao: mesmaColuna && ordenacaoHistorico.direcao === "asc" ? "desc" : "asc"
+        };
+        renderizarTabelaHistorico();
+      });
+    });
 
     modalBody.querySelectorAll(".btn-filtro-modal-jornada").forEach((btn) => {
       btn.addEventListener("click", (event) => {
@@ -1616,6 +1988,10 @@ function abrirModalHistoricoEquipePeriodo(equipeSelecionada, origemEl = null) {
     });
   };
 
+  modal.dataset.assinaturaSupervisor = equipeSelecionada.SUPERVISOR_EQUIPE || "";
+  modal.dataset.assinaturaEquipe = equipeSelecionada.NOME_EQUIPE || "";
+  modal.dataset.assinaturaLider = equipeSelecionada.LIDER_CONTROLADOR || "";
+  modal.dataset.assinaturaControlador = equipeSelecionada.NOME_CONTROLADOR || "";
   modal.querySelector("h2").textContent = `Historico da Equipe - ${equipeSelecionada.NOME_EQUIPE || ""}`;
   renderizarTabelaHistorico();
   abrirModalPosicionado(modal, origemEl);
@@ -1762,7 +2138,7 @@ function atualizarTudo() {
   const lista = aplicarFiltrosColuna(agruparPorEquipe(aplicarFiltros()));
   const equipes = [...new Set(lista.map(l => l.NOME_EQUIPE).filter(Boolean))];
 
-  const d = lista.filter(l => String(l.COD_CLASSIFICACAO_DINAMICO || "") === "D");
+  const d = lista.filter(equipeEhClassificacaoD);
   const eqD = new Set(d.map(l => l.NOME_EQUIPE)).size;
 
   setText("kpiTotalEqpDia", equipes.length);
@@ -1782,10 +2158,98 @@ function atualizarTudo() {
   const desvioUlt = lista.filter(l => l.STATUS_FINAL === "TEMPO PARADO EXCESSIVO").length;
   setText("kpiDesvioUltAtend", desvioUlt);
 
+  const jornadaProdIncompleta = lista.filter(l => l.STATUS_PROD === "INCOMPLETA").length;
+  setText("kpiJornadaProdIncompleta", jornadaProdIncompleta);
+
   const incompleta = lista.filter(l => ["INCOMPLETA", "SEM ENCERRAMENTO"].includes(l.STATUS_JORNADA)).length;
   setText("kpiJornadaIncompleta", incompleta);
 
   preencherTabela();
+}
+
+const METRICAS_TOPO5 = [
+  { key: "INICIO_JORNADA", label: "Início Jornada", tipo: "hora", ordem: "desc" },
+  { key: "PRIMEIRO_ATENDIMENTO", label: "Primeiro Atendimento", tipo: "hora", ordem: "desc" },
+  { key: "ULTIMO_ATENDIMENTO", label: "Último Serv.", tipo: "hora", ordem: "desc" },
+  { key: "JORNADA_PROD", label: "Jornada Prod.", tipo: "duracao", ordem: "asc" },
+  { key: "FIM_JORNADA", label: "Fim Jornada", tipo: "hora", ordem: "desc" },
+  { key: "JORNADA", label: "Jornada", tipo: "duracao", ordem: "asc" }
+];
+
+function obterTop5PorMetrica(lista, metrica) {
+  const valores = lista
+    .map(row => {
+      const minutos = hhmmToMin(row[metrica.key]);
+      return Number.isFinite(minutos) ? { equipe: String(row.NOME_EQUIPE || "").trim(), minutos } : null;
+    })
+    .filter(Boolean);
+
+  if (!valores.length) return [];
+
+  return valores
+    .sort((a, b) => {
+      const ordenacao = metrica.ordem === "desc" ? b.minutos - a.minutos : a.minutos - b.minutos;
+      if (ordenacao !== 0) return ordenacao;
+      return a.equipe.localeCompare(b.equipe);
+    })
+    .slice(0, 5)
+    .map((item, index) => ({
+      posicao: index + 1,
+      equipe: item.equipe,
+      valor: minToHHMM(item.minutos)
+    }));
+}
+
+function abrirModalTop5MetricasJornada() {
+  const lista = aplicarFiltrosColuna(agruparPorEquipe(aplicarFiltros()));
+  const modal = document.getElementById("modalDetalhes");
+  if (!modal) return;
+
+  const titulo = modal.querySelector("h2");
+  if (titulo) titulo.textContent = "Top 5 métricas de jornada";
+
+  const body = modal.querySelector("#modalBody");
+  if (!body) return;
+
+  const cards = METRICAS_TOPO5.map((metrica) => {
+    const top5 = obterTop5PorMetrica(lista, metrica);
+    const rows = top5.length
+      ? top5.map(item => `
+          <tr>
+            <td>${item.posicao}</td>
+            <td>${safe(item.equipe)}</td>
+            <td>${item.valor}</td>
+          </tr>
+        `).join("")
+      : `<tr><td colspan="3">Nenhum registro válido para ${safe(metrica.label)}.</td></tr>`;
+
+    return `
+      <div class="modal-top5-card">
+        <h3>${metrica.label}</h3>
+        <table class="modal-tabela">
+          <thead>
+            <tr>
+              <th>Posição</th>
+              <th>Equipe</th>
+              <th>Valor médio</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }).join("");
+
+  body.innerHTML = `
+    <p>Top 5 equipes separadas por métrica de jornada, usando a média dos registros filtrados.</p>
+    <div class="modal-top5-grid">
+      ${cards}
+    </div>
+  `;
+
+  abrirModalPosicionado(modal, null);
 }
 
 function renderizarPaginacao(totalPaginas) {

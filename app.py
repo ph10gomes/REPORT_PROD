@@ -3,10 +3,14 @@ import gzip
 import json
 import os
 import re
+import subprocess
+import tempfile
+import unicodedata
+import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_cors import CORS
 import mysql.connector
 
@@ -168,12 +172,11 @@ def get_week_range_from_iso_date(iso_date):
     except Exception:
         return None
 
-    day = dt.weekday()
-    monday = dt - datetime.timedelta(days=day)
-    sunday = monday + datetime.timedelta(days=6)
+    sunday = dt - datetime.timedelta(days=(dt.weekday() + 1) % 7)
+    saturday = sunday + datetime.timedelta(days=6)
     return {
-        "start": monday.strftime("%Y-%m-%d"),
-        "end": sunday.strftime("%Y-%m-%d"),
+        "start": sunday.strftime("%Y-%m-%d"),
+        "end": saturday.strftime("%Y-%m-%d"),
     }
 
 
@@ -424,6 +427,7 @@ def map_report_csc_hoje_row(db_row):
         "Executados": db_row.get("EXECUTADOS", ""),
         "Produtivos": db_row.get("PRODUTIVOS", ""),
         "Nome": nome_equipe,
+        "NOME_EQUIPE": nome_equipe,
         "Cód.UO": cod_uo,
         "CÃ³d.UO": cod_uo,
         "CÃƒÂ³d.UO": cod_uo,
@@ -431,6 +435,13 @@ def map_report_csc_hoje_row(db_row):
         "CÃ³d. Equipe": cod_equipe,
         "CÃƒÂ³d. Equipe": cod_equipe,
         "NUM_EQUIPE": num_equipe,
+        "TIPO_EQUIPE": first_non_empty(
+            db_row.get("TIPO_EQUIPE"),
+            db_row.get("TIPO"),
+            db_row.get("TIPO_VEICULO"),
+            db_row.get("MODALIDADE"),
+            db_row.get("PERFIL_EQUIPE"),
+        ),
         "SUPERVISOR - SETOR": normalize_spaces(db_row.get("NOME_SUPERVISOR", "")),
         "LIDER DE POSTO - SETOR": normalize_spaces(db_row.get("NOME_LIDER", "")),
         "CONTROLADOR - SETOR": normalize_spaces(db_row.get("NOME_CONTROLADOR", "")),
@@ -861,42 +872,41 @@ def controle_servico():
 
         where = []
         params = []
-        where_sem_uo = []
-        params_sem_uo = []
 
         data = request.args.get("data")
         uo = request.args.get("uo")
         cod_equipe = request.args.get("codEquipe")
+        cod_ativ = request.args.get("codAtiv")
 
         date_cols = []
         col_data_atualizacao = pick_column(columns, ["DATA_ATUALIZACAO", "DATA ATUALIZACAO", "DATA_ATUALIZAÇÃO", "DATA_ATUALIZACAO_D"])
         if not col_data_atualizacao:
             return jsonify({"ok": False, "error": "Coluna DATA_ATUALIZACAO nao encontrada na tabela de controle de servicos."}), 400
         col_data_designacao = pick_column(columns, ["DATA_DESIGNACAO", "DESIGNACAO", "DATA DESIGNACAO"])
+        col_data_termino = pick_column(columns, ["DATA_TERMINO_REAL", "ENCERRAMENTO", "DATA_TERMINO"])
         data_ref = str(request.args.get("dataRef", "")).strip().lower()
-        col_data_filtro = col_data_designacao if data_ref == "designacao" and col_data_designacao else col_data_atualizacao
+        if data_ref == "designacao" and col_data_designacao:
+            col_data_filtro = col_data_designacao
+        elif data_ref in {"termino", "data_termino", "data_termino_real"} and col_data_termino:
+            col_data_filtro = col_data_termino
+        else:
+            col_data_filtro = col_data_atualizacao
         date_cols.append(col_data_filtro)
 
         if data:
             add_date_filter_for_columns(data, date_cols, where, params)
-            add_date_filter_for_columns(data, date_cols, where_sem_uo, params_sem_uo)
 
         if request.args.get("dataInicio"):
             data_inicio = str(request.args.get("dataInicio"))[:10]
             where.append(f"DATE(`{col_data_filtro}`) >= %s")
             params.append(data_inicio)
-            where_sem_uo.append(f"DATE(`{col_data_filtro}`) >= %s")
-            params_sem_uo.append(data_inicio)
 
         if request.args.get("dataFim"):
             data_fim = str(request.args.get("dataFim"))[:10]
             where.append(f"DATE(`{col_data_filtro}`) <= %s")
             params.append(data_fim)
-            where_sem_uo.append(f"DATE(`{col_data_filtro}`) <= %s")
-            params_sem_uo.append(data_fim)
 
         col_uo = pick_column(columns, ["COD_UO", "UO"])
-        usou_uo = bool(uo and col_uo)
         if uo and col_uo:
             where.append(f"`{col_uo}` = %s")
             params.append(str(uo))
@@ -905,8 +915,17 @@ def controle_servico():
         if cod_equipe and col_eq:
             where.append(f"`{col_eq}` = %s")
             params.append(str(cod_equipe))
-            where_sem_uo.append(f"`{col_eq}` = %s")
-            params_sem_uo.append(str(cod_equipe))
+
+        cols_ativ = [
+            col for col in (
+                pick_column(columns, [name])
+                for name in ["COD_ATIV", "COD ATIV", "CODATIV", "COD_ATIVIDADE", "CODIGO_ATIVIDADE", "TIPO_SERVICO"]
+            )
+            if col
+        ]
+        if cod_ativ and cols_ativ:
+            where.append("(" + " OR ".join([f"UPPER(TRIM(CAST(`{col}` AS CHAR))) = UPPER(TRIM(%s))" for col in cols_ativ]) + ")")
+            params.extend([str(cod_ativ)] * len(cols_ativ))
 
         limit = int(request.args.get("limit", "20000"))
         if limit < 1 or limit > 200000:
@@ -924,16 +943,6 @@ def controle_servico():
         params.append(limit)
 
         rows = execute_query(sql, params)
-
-        if not rows and usou_uo:
-            sql_sem_uo = f"SELECT * FROM `{table}`"
-            if where_sem_uo:
-                sql_sem_uo += f" WHERE {' AND '.join(where_sem_uo)}"
-            if order_col:
-                sql_sem_uo += f" ORDER BY `{order_col}` ASC"
-            sql_sem_uo += " LIMIT %s"
-            params_sem_uo.append(limit)
-            rows = execute_query(sql_sem_uo, params_sem_uo)
 
         return jsonify({"ok": True, "table": table, "count": len(rows), "rows": rows})
     except ValueError as error:
@@ -1696,6 +1705,639 @@ def lote_prod_equipes():
         return jsonify({"error": str(error)}), 500
 
 
+def analitico_number(value):
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return 0.0
+        normalized = trimmed.replace(".", "").replace(",", ".") if "," in trimmed else trimmed
+        try:
+            return float(normalized)
+        except Exception:
+            return 0.0
+
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0.0
+
+
+def analitico_time_to_minutes(value):
+    match = re.search(r"(\d{1,2}):(\d{2})", str(value or ""))
+    if not match:
+        return None
+    return int(match.group(1)) * 60 + int(match.group(2))
+
+
+def analitico_minutes_to_time(value):
+    if value is None:
+        return "--:--"
+    total = max(0, round(value))
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def analitico_average(values):
+    valid = [value for value in values if value is not None]
+    return sum(valid) / len(valid) if valid else None
+
+
+def analitico_flag_produtivo(row):
+    value = str(row.get("PRODUTIVO") or "").strip().upper()
+    value = unicodedata.normalize("NFD", value)
+    value = "".join(ch for ch in value if unicodedata.category(ch) != "Mn")
+    if value in {"SIM", "S", "T", "1", "TRUE", "PRODUTIVO"}:
+        return "SIM"
+    if value in {"NAO", "N", "F", "0", "FALSE", "IMPRODUTIVO", "IMPEDIMENTO"}:
+        return "NAO"
+    return ""
+
+
+def analitico_tipo_equipe(row):
+    text = f"{row.get('TIPO_EQUIPE') or ''} {row.get('NOME_EQUIPE') or row.get('NOME') or ''}"
+    text = unicodedata.normalize("NFD", text.upper())
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    if "MOTO" in text or "MTVP" in text:
+        return "MOTO"
+    return "MULTI"
+
+
+def analitico_classificar_faixa(percentual):
+    value = analitico_number(percentual)
+    if value >= 95:
+        return "AA"
+    if value >= 85:
+        return "A"
+    if value >= 75:
+        return "B"
+    if value >= 65:
+        return "C"
+    return "D"
+
+
+def analitico_equipe_d(percentual):
+    value = analitico_number(percentual)
+    return value <= 75
+
+
+def analitico_produtividade_mes(row):
+    meta_mes = analitico_number((row or {}).get("META_MES"))
+    valor_mes = analitico_number((row or {}).get("VALOR_US_MES"))
+    return (valor_mes / meta_mes) * 100 if meta_mes > 0 else 0
+
+
+def analitico_faixa_peso(faixa):
+    value = str(faixa or "").strip().upper()
+    if value == "AA":
+        return 5
+    if value == "A":
+        return 4
+    if value == "B":
+        return 3
+    if value == "C":
+        return 2
+    if value == "D":
+        return 1
+    return None
+
+
+def analitico_faixa_por_peso(peso):
+    try:
+        value = float(peso)
+    except Exception:
+        return "-"
+    if value >= 4.5:
+        return "AA"
+    if value >= 3.5:
+        return "A"
+    if value >= 2.5:
+        return "B"
+    if value >= 1.5:
+        return "C"
+    return "D"
+
+
+def analitico_date_params():
+    data_inicio = parse_flexible_date_ref(request.args.get("dataInicio")) or "2026-04-01"
+    data_fim = parse_flexible_date_ref(request.args.get("dataFim")) or "2026-04-30"
+    return data_inicio, data_fim
+
+
+def analitico_add_months(value, months):
+    year = value.year + ((value.month - 1 + months) // 12)
+    month = ((value.month - 1 + months) % 12) + 1
+    return value.replace(year=year, month=month, day=1)
+
+
+def analitico_month_label(month_key):
+    try:
+        value = datetime.datetime.strptime(str(month_key), "%Y-%m").date()
+        labels = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
+        return f"{labels[value.month - 1]}/{str(value.year)[-2:]}"
+    except Exception:
+        return str(month_key or "")
+
+
+@app.route("/api/painel-analitico/supervisores")
+def painel_analitico_supervisores():
+    try:
+        data_inicio, data_fim = analitico_date_params()
+        rows = execute_query(
+            """
+            SELECT TRIM(NOME_SUPERVISOR) AS supervisor, COUNT(DISTINCT COD_EQUIPE) AS equipes
+            FROM report_csc_hoje
+            WHERE STR_TO_DATE(DATA, '%d/%m/%Y') >= %s
+              AND STR_TO_DATE(DATA, '%d/%m/%Y') <= %s
+              AND NULLIF(TRIM(NOME_SUPERVISOR), '') IS NOT NULL
+            GROUP BY TRIM(NOME_SUPERVISOR)
+            ORDER BY supervisor
+            """,
+            [data_inicio, data_fim],
+        )
+        return jsonify({"ok": True, "dataInicio": data_inicio, "dataFim": data_fim, "rows": rows})
+    except Exception as error:
+        return jsonify({"ok": False, "error": str(error)}), 500
+
+
+@app.route("/api/painel-analitico")
+def painel_analitico():
+    try:
+        supervisor = str(request.args.get("supervisor") or "").strip()
+        if not supervisor:
+            return jsonify({"ok": False, "error": "Informe o parametro supervisor."}), 400
+
+        data_inicio, data_fim = analitico_date_params()
+        report_where = """
+          STR_TO_DATE(DATA, '%d/%m/%Y') >= %s
+          AND STR_TO_DATE(DATA, '%d/%m/%Y') <= %s
+          AND UPPER(TRIM(NOME_SUPERVISOR)) = UPPER(TRIM(%s))
+        """
+
+        report_rows = execute_query(
+            f"""
+            SELECT r.*
+            FROM report_csc_hoje r
+            JOIN (
+              SELECT MAX(id) AS id
+              FROM report_csc_hoje
+              WHERE {report_where}
+              GROUP BY DATA, COD_EQUIPE
+            ) latest ON latest.id = r.id
+            ORDER BY STR_TO_DATE(r.DATA, '%d/%m/%Y'), r.NOME_EQUIPE
+            """,
+            [data_inicio, data_fim, supervisor],
+        )
+
+        codigos = sorted({str(row.get("COD_EQUIPE") or "").strip() for row in report_rows if str(row.get("COD_EQUIPE") or "").strip()})
+        controle_rows = []
+        lote_rows = []
+        if codigos:
+            placeholders = ",".join(["%s"] * len(codigos))
+            controle_rows = execute_query(
+                f"""
+                SELECT *
+                FROM controle_servico
+                WHERE COD_EQUIPE_WM IN ({placeholders})
+                  AND DATE(DATA_DESIGNACAO) >= %s
+                  AND DATE(DATA_DESIGNACAO) <= %s
+                """,
+                [*codigos, data_inicio, data_fim],
+            )
+
+            database_lote = sanitize_table_name_unicode(os.getenv("MYSQL_DATABASE_LOTE_PROD", "producao"))
+            view_lote = sanitize_table_name_unicode(os.getenv("MYSQL_VIEW_LOTE_PROD", "nivel_1_meta"))
+            lote_rows = execute_query(
+                f"""
+                SELECT
+                  DATA,
+                  TRIM(CAST(COD_EQUIPE AS CHAR)) AS COD_EQUIPE,
+                  VALOR_US,
+                  VALOR_US_MES,
+                  META_MES,
+                  META,
+                  FAIXA_DIA,
+                  FAIXA_MES
+                FROM `{database_lote}`.`{view_lote}`
+                WHERE DATA IS NOT NULL
+                  AND DATA >= %s
+                  AND DATA <= %s
+                  AND TRIM(CAST(COD_EQUIPE AS CHAR)) IN ({placeholders})
+                """,
+                [data_inicio, data_fim, *codigos],
+            )
+
+        report_by_team = {}
+        for row in report_rows:
+            codigo = str(row.get("COD_EQUIPE") or "").strip()
+            report_by_team.setdefault(codigo, []).append(row)
+
+        services_by_team = {}
+        for row in controle_rows:
+            codigo = str(row.get("COD_EQUIPE_WM") or "").strip()
+            services_by_team.setdefault(codigo, []).append(row)
+
+        tipo_por_codigo = {}
+        for row in report_rows:
+            codigo = str(row.get("COD_EQUIPE") or "").strip()
+            if codigo and codigo not in tipo_por_codigo:
+                tipo_por_codigo[codigo] = analitico_tipo_equipe(row)
+
+        total_meta_lote = sum(analitico_number(row.get("META")) for row in lote_rows)
+        total_exec_lote = sum(analitico_number(row.get("VALOR_US")) for row in lote_rows)
+        performance_geral = (total_exec_lote / total_meta_lote) * 100 if total_meta_lote > 0 else 0
+
+        def performance_tipo(tipo):
+            rows = [row for row in lote_rows if tipo_por_codigo.get(str(row.get("COD_EQUIPE") or "").strip()) == tipo]
+            meta = sum(analitico_number(row.get("META")) for row in rows)
+            prod = sum(analitico_number(row.get("VALOR_US")) for row in rows)
+            return (prod / meta) * 100 if meta > 0 else 0
+
+        lote_por_equipe = {}
+        lote_mensal_por_equipe = {}
+        for row in lote_rows:
+            codigo = str(row.get("COD_EQUIPE") or "").strip()
+            if not codigo:
+                continue
+            data_row = str(row.get("DATA") or "")[:10]
+            mensal_atual = lote_mensal_por_equipe.get(codigo)
+            if not mensal_atual or data_row >= str(mensal_atual.get("DATA") or "")[:10]:
+                lote_mensal_por_equipe[codigo] = row
+            atual = lote_por_equipe.setdefault(codigo, {"meta": 0, "prod": 0, "ratio_total": 0, "ratio_count": 0, "faixa_total": 0, "faixa_count": 0})
+            meta_dia = analitico_number(row.get("META"))
+            prod_dia = analitico_number(row.get("VALOR_US"))
+            faixa_peso = analitico_faixa_peso(row.get("FAIXA_DIA"))
+            atual["meta"] += meta_dia
+            atual["prod"] += prod_dia
+            if meta_dia > 0:
+                atual["ratio_total"] += (prod_dia / meta_dia) * 100
+                atual["ratio_count"] += 1
+            if faixa_peso is not None:
+                atual["faixa_total"] += faixa_peso
+                atual["faixa_count"] += 1
+        equipes_d_lote = sum(
+            1 for item in lote_mensal_por_equipe.values()
+            if analitico_equipe_d(analitico_produtividade_mes(item))
+        )
+
+        first_times = [analitico_time_to_minutes(row.get("PRIMEIRO_ATENDIMENTO")) for row in report_rows]
+        last_times = [analitico_time_to_minutes(row.get("ULTIMO_ATENDIMENTO")) for row in report_rows]
+        jornada_times = []
+        for row in report_rows:
+            first = analitico_time_to_minutes(row.get("PRIMEIRO_ATENDIMENTO"))
+            last = analitico_time_to_minutes(row.get("ULTIMO_ATENDIMENTO"))
+            jornada_times.append(last - first if first is not None and last is not None and last >= first else None)
+        jornadas_validas = len([value for value in jornada_times if value is not None])
+        jornadas_incompletas = len([value for value in jornada_times if value is not None and value < 7 * 60])
+
+        executados = [
+            row for row in controle_rows
+            if row.get("DATA_TERMINO_REAL") and analitico_flag_produtivo(row) in {"SIM", "NAO"}
+        ]
+        improdutivos = [row for row in executados if analitico_flag_produtivo(row) == "NAO"]
+        indice_impedimento = (len(improdutivos) / len(executados)) * 100 if executados else 0
+
+        def indice_imp_tipo(tipo):
+            rows = [row for row in executados if tipo_por_codigo.get(str(row.get("COD_EQUIPE_WM") or "").strip()) == tipo]
+            imp = len([row for row in rows if analitico_flag_produtivo(row) == "NAO"])
+            return (imp / len(rows)) * 100 if rows else 0
+
+        historico_vozes = []
+        try:
+            data_fim_dt = datetime.datetime.strptime(data_fim, "%Y-%m-%d").date()
+            historico_inicio_dt = analitico_add_months(data_fim_dt.replace(day=1), -1)
+            historico_inicio = historico_inicio_dt.isoformat()
+
+            historico_report_rows = execute_query(
+                f"""
+                SELECT r.*
+                FROM report_csc_hoje r
+                JOIN (
+                  SELECT MAX(id) AS id
+                  FROM report_csc_hoje
+                  WHERE STR_TO_DATE(DATA, '%d/%m/%Y') >= %s
+                    AND STR_TO_DATE(DATA, '%d/%m/%Y') <= %s
+                    AND UPPER(TRIM(NOME_SUPERVISOR)) = UPPER(TRIM(%s))
+                  GROUP BY DATA, COD_EQUIPE
+                ) latest ON latest.id = r.id
+                ORDER BY STR_TO_DATE(r.DATA, '%d/%m/%Y'), r.NOME_EQUIPE
+                """,
+                [historico_inicio, data_fim, supervisor],
+            )
+
+            historico_codigos = sorted({
+                str(row.get("COD_EQUIPE") or "").strip()
+                for row in historico_report_rows
+                if str(row.get("COD_EQUIPE") or "").strip()
+            })
+            historico_controle_rows = []
+            historico_lote_rows = []
+            if historico_codigos:
+                historico_placeholders = ",".join(["%s"] * len(historico_codigos))
+                historico_controle_rows = execute_query(
+                    f"""
+                    SELECT *
+                    FROM controle_servico
+                    WHERE COD_EQUIPE_WM IN ({historico_placeholders})
+                      AND DATE(DATA_DESIGNACAO) >= %s
+                      AND DATE(DATA_DESIGNACAO) <= %s
+                    """,
+                    [*historico_codigos, historico_inicio, data_fim],
+                )
+
+                historico_lote_rows = execute_query(
+                    f"""
+                    SELECT
+                      DATA,
+                      TRIM(CAST(COD_EQUIPE AS CHAR)) AS COD_EQUIPE,
+                      VALOR_US,
+                      META
+                    FROM `{database_lote}`.`{view_lote}`
+                    WHERE DATA IS NOT NULL
+                      AND DATA >= %s
+                      AND DATA <= %s
+                      AND TRIM(CAST(COD_EQUIPE AS CHAR)) IN ({historico_placeholders})
+                    """,
+                    [historico_inicio, data_fim, *historico_codigos],
+                )
+
+            historico_tipo_por_codigo = {}
+            for row in historico_report_rows:
+                codigo = str(row.get("COD_EQUIPE") or "").strip()
+                if codigo and codigo not in historico_tipo_por_codigo:
+                    historico_tipo_por_codigo[codigo] = analitico_tipo_equipe(row)
+
+            meses = [
+                analitico_add_months(historico_inicio_dt, index).strftime("%Y-%m")
+                for index in range(2)
+            ]
+            por_mes = {
+                mes: {
+                    "mes": mes,
+                    "label": analitico_month_label(mes),
+                    "meta": 0,
+                    "prod": 0,
+                    "executados": 0,
+                    "improdutivos": 0,
+                    "jornadasValidas": 0,
+                    "jornadasIncompletas": 0,
+                }
+                for mes in meses
+            }
+
+            for row in historico_lote_rows:
+                raw_data = row.get("DATA")
+                mes = raw_data.strftime("%Y-%m") if hasattr(raw_data, "strftime") else str(raw_data or "")[:7]
+                if mes not in por_mes:
+                    continue
+                por_mes[mes]["meta"] += analitico_number(row.get("META"))
+                por_mes[mes]["prod"] += analitico_number(row.get("VALOR_US"))
+
+            for row in historico_controle_rows:
+                codigo = str(row.get("COD_EQUIPE_WM") or "").strip()
+                if codigo not in historico_tipo_por_codigo:
+                    continue
+                raw_data = row.get("DATA_DESIGNACAO") or row.get("DATA_TERMINO_REAL")
+                mes = raw_data.strftime("%Y-%m") if hasattr(raw_data, "strftime") else str(raw_data or "")[:7]
+                if mes not in por_mes or not row.get("DATA_TERMINO_REAL"):
+                    continue
+                flag = analitico_flag_produtivo(row)
+                if flag not in {"SIM", "NAO"}:
+                    continue
+                por_mes[mes]["executados"] += 1
+                if flag == "NAO":
+                    por_mes[mes]["improdutivos"] += 1
+
+            for row in historico_report_rows:
+                raw_data = row.get("DATA")
+                try:
+                    mes = datetime.datetime.strptime(str(raw_data), "%d/%m/%Y").strftime("%Y-%m")
+                except Exception:
+                    mes = str(raw_data or "")[:7]
+                if mes not in por_mes:
+                    continue
+                first = analitico_time_to_minutes(row.get("PRIMEIRO_ATENDIMENTO"))
+                last = analitico_time_to_minutes(row.get("ULTIMO_ATENDIMENTO"))
+                if first is None or last is None or last < first:
+                    continue
+                por_mes[mes]["jornadasValidas"] += 1
+                if (last - first) < 7 * 60:
+                    por_mes[mes]["jornadasIncompletas"] += 1
+
+            for mes in meses:
+                item = por_mes[mes]
+                impedimento_mes = (item["improdutivos"] / item["executados"]) * 100 if item["executados"] else 0
+                produtividade_mes = (item["prod"] / item["meta"]) * 100 if item["meta"] > 0 else 0
+                jornada_incompleta_mes = (item["jornadasIncompletas"] / item["jornadasValidas"]) * 100 if item["jornadasValidas"] else 0
+                historico_vozes.append({
+                    "mes": item["mes"],
+                    "label": item["label"],
+                    "impedimento": impedimento_mes,
+                    "produtividade": produtividade_mes,
+                    "jornada": max(0, min(100, 100 - jornada_incompleta_mes)),
+                    "executados": item["executados"],
+                    "improdutivos": item["improdutivos"],
+                    "jornadasValidas": item["jornadasValidas"],
+                    "jornadasIncompletas": item["jornadasIncompletas"],
+                })
+        except Exception:
+            historico_vozes = []
+
+        equipes = []
+        for codigo in codigos:
+            report = report_by_team.get(codigo, [])
+            services = services_by_team.get(codigo, [])
+            exec_rows = [row for row in services if row.get("DATA_TERMINO_REAL") and analitico_flag_produtivo(row) in {"SIM", "NAO"}]
+            imp_rows = [row for row in exec_rows if analitico_flag_produtivo(row) == "NAO"]
+            prod_rows = [row for row in exec_rows if analitico_flag_produtivo(row) == "SIM"]
+            lote_equipe = lote_por_equipe.get(codigo)
+            lote_mensal_equipe = lote_mensal_por_equipe.get(codigo)
+            meta = lote_equipe["meta"] if lote_equipe else sum(analitico_number(row.get("META")) for row in report)
+            prod = lote_equipe["prod"] if lote_equipe else sum(analitico_number(row.get("US_EXEC")) for row in report)
+            jornada_equipe_times = []
+            for row in report:
+                first_time = analitico_time_to_minutes(row.get("PRIMEIRO_ATENDIMENTO"))
+                last_time = analitico_time_to_minutes(row.get("ULTIMO_ATENDIMENTO"))
+                jornada_equipe_times.append(last_time - first_time if first_time is not None and last_time is not None and last_time >= first_time else None)
+            first = report[0] if report else {}
+            performance = analitico_produtividade_mes(lote_mensal_equipe) if lote_mensal_equipe else ((lote_equipe["ratio_total"] / lote_equipe["ratio_count"]) if lote_equipe and lote_equipe["ratio_count"] else ((prod / meta) * 100 if meta > 0 else 0))
+            faixa_sistema = str(lote_mensal_equipe.get("FAIXA_MES") or "").strip().upper() if lote_mensal_equipe else (analitico_faixa_por_peso(lote_equipe["faixa_total"] / lote_equipe["faixa_count"]) if lote_equipe and lote_equipe["faixa_count"] else analitico_classificar_faixa(performance))
+            if not faixa_sistema:
+                faixa_sistema = "-"
+            equipes.append({
+                "codigo": codigo,
+                "equipe": first.get("NOME_EQUIPE") or (services[0].get("NOME") if services else None) or codigo,
+                "tipo": analitico_tipo_equipe(first),
+                "totalServicos": len(services),
+                "executados": len(exec_rows),
+                "produtivos": len(prod_rows),
+                "improdutivos": len(imp_rows),
+                "impedimento": (len(imp_rows) / len(exec_rows)) * 100 if exec_rows else 0,
+                "performance": performance,
+                "jornadaProdutiva": analitico_minutes_to_time(analitico_average(jornada_equipe_times)),
+                "faixa": faixa_sistema,
+                "dias": len({str(row.get("DATA") or "")[:10] for row in report}),
+            })
+
+        total_equipes = len(codigos)
+        total_servicos = len(controle_rows)
+        total_dias_equipe = sum(item["dias"] for item in equipes)
+        top_equipes_base = sorted(equipes, key=lambda item: (-item["totalServicos"], item["equipe"]))[:10]
+        top_equipes = []
+        acumulado = 0
+        for item in top_equipes_base:
+            perc = (item["totalServicos"] / total_servicos) * 100 if total_servicos else 0
+            acumulado += perc
+            top_equipes.append({**item, "perc": perc, "acumulado": acumulado})
+
+        por_impedimento = sorted([item for item in equipes if item["executados"] > 0], key=lambda item: item["impedimento"], reverse=True)
+        equipes_acima_30 = len([item for item in equipes if item["impedimento"] > 30])
+        faixas_base = [
+            {"label": ">= 50%", "min": 50, "max": float("inf")},
+            {"label": "40% a 49%", "min": 40, "max": 50},
+            {"label": "30% a 39%", "min": 30, "max": 40},
+            {"label": "20% a 29%", "min": 20, "max": 30},
+            {"label": "10% a 19%", "min": 10, "max": 20},
+            {"label": "< 10%", "min": float("-inf"), "max": 10},
+        ]
+        faixas_impedimento = []
+        for faixa in faixas_base:
+            quantidade = len([item for item in equipes if item["impedimento"] >= faixa["min"] and item["impedimento"] < faixa["max"]])
+            faixas_impedimento.append({
+                "label": faixa["label"],
+                "quantidade": quantidade,
+                "percentual": (quantidade / total_equipes) * 100 if total_equipes else 0,
+            })
+
+        return jsonify({
+            "ok": True,
+            "filtros": {"supervisor": supervisor, "dataInicio": data_inicio, "dataFim": data_fim},
+            "supervisor": supervisor,
+            "periodo": {"dataInicio": data_inicio, "dataFim": data_fim},
+            "processo": "ANALITICO",
+            "totalEquipes": total_equipes,
+            "totalServicos": total_servicos,
+            "mediaMensalServicos": total_servicos / total_equipes if total_equipes else 0,
+            "mediaServEquipeDia": total_servicos / total_dias_equipe if total_dias_equipe else 0,
+            "performance": {
+                "geral": performance_geral,
+                "moto": performance_tipo("MOTO"),
+                "multi": performance_tipo("MULTI"),
+                "equipesD": equipes_d_lote,
+            },
+            "jornada": {
+                "mediaPrimeiroAtendimento": analitico_minutes_to_time(analitico_average(first_times)),
+                "mediaUltimoAtendimento": analitico_minutes_to_time(analitico_average(last_times)),
+                "mediaJornadaProdutiva": analitico_minutes_to_time(analitico_average(jornada_times)),
+                "percentualIncompleta": (jornadas_incompletas / jornadas_validas) * 100 if jornadas_validas else 0,
+            },
+            "eficiencia": {
+                "indiceImpedimento": indice_impedimento,
+                "improdutivoMoto": indice_imp_tipo("MOTO"),
+                "improdutivoMulti": indice_imp_tipo("MULTI"),
+                "executados": len(executados),
+                "improdutivos": len(improdutivos),
+            },
+            "topEquipes": top_equipes,
+            "estatisticas": {
+                "maiorImpedimento": por_impedimento[0] if por_impedimento else None,
+                "menorImpedimento": por_impedimento[-1] if por_impedimento else None,
+                "equipesAcima30": equipes_acima_30,
+                "equipesAcima30Perc": (equipes_acima_30 / total_equipes) * 100 if total_equipes else 0,
+                "top5Perc": sum(item["perc"] for item in top_equipes),
+                "top10Perc": sum(item["perc"] for item in top_equipes),
+            },
+            "faixasImpedimento": faixas_impedimento,
+            "historicoVozes": historico_vozes,
+            "equipes": equipes,
+        })
+    except Exception as error:
+        return jsonify({"ok": False, "error": str(error)}), 500
+
+
+def edge_executable_path():
+    candidates = [
+        os.getenv("EDGE_EXECUTABLE"),
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return candidate
+    raise RuntimeError("Microsoft Edge/Chrome não encontrado para exportar a imagem.")
+
+
+def sanitize_download_name(value):
+    name = re.sub(r'[\\/:*?"<>|]+', "-", str(value or "painel-analitico.png"))
+    name = re.sub(r"\s+", "-", name).strip("-")[:120] or "painel-analitico.png"
+    return name if name.lower().endswith(".png") else f"{name}.png"
+
+
+@app.route("/api/painel-analitico/export-image", methods=["POST"])
+def painel_analitico_export_image():
+    export_dir = BASE_DIR / "tmp" / "exports"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    export_id = uuid.uuid4().hex
+    html_path = export_dir / f"{export_id}.html"
+    png_path = export_dir / f"{export_id}.png"
+
+    try:
+        payload = request.get_json(silent=True) or {}
+        width = max(320, min(3000, int(payload.get("width") or 1280)))
+        height = max(320, min(3000, int(payload.get("height") or 900)))
+        css = str(payload.get("css") or "")
+        panel_html = str(payload.get("html") or "")
+        if not panel_html.strip():
+            return jsonify({"ok": False, "error": "Painel vazio para exportação."}), 400
+
+        document_html = f"""<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <style>
+    {css}
+    html, body {{ margin: 0; padding: 0; background: #f7f8f4; }}
+    .panel {{ margin: 0 !important; box-shadow: none !important; }}
+  </style>
+</head>
+<body>{panel_html}</body>
+</html>"""
+        html_path.write_text(document_html, encoding="utf-8")
+
+        subprocess.run(
+            [
+                edge_executable_path(),
+                "--headless",
+                "--disable-gpu",
+                "--no-first-run",
+                f"--window-size={width},{height}",
+                f"--screenshot={png_path}",
+                html_path.as_uri(),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        filename = sanitize_download_name(payload.get("filename"))
+        png_bytes = png_path.read_bytes()
+        response = Response(png_bytes, mimetype="image/png")
+        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+    except Exception as error:
+        return jsonify({"ok": False, "error": str(error)}), 500
+    finally:
+        try:
+            html_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            png_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 @app.route("/api/codx")
 def codx():
     try:
@@ -1853,6 +2495,7 @@ def jornadas():
                   NOME_CONTROLADOR,
                   NOME_EQUIPE,
                   COD_CLASSIFICACAO_DINAMICO,
+                  CLASSIFICACAO_EXEC_META,
                   META,
                   US_EXEC AS PRODUCAO,
                   EXECUTADOS AS SERVICOS_EXECUTADOS,
@@ -1886,6 +2529,7 @@ def jornadas():
                   NOME_CONTROLADOR,
                   NOME_EQUIPE,
                   COD_CLASSIFICACAO_DINAMICO,
+                  CLASSIFICACAO_EXEC_META,
                   META,
                   US_EXEC AS PRODUCAO,
                   EXECUTADOS AS SERVICOS_EXECUTADOS,
@@ -1964,4 +2608,4 @@ def static_files(path):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT, debug=False)
+    app.run(host="0.0.0.0", port=4201, debug=False)
